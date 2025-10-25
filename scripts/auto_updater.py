@@ -59,7 +59,7 @@ class AutoUpdater:
         msg = (f"{APP_NAME} v{latest_version} is "
                "available.\nDo you want to update now?")
         if tkmsg.askyesno(f"{APP_SHORT_NAME} Update", msg):
-            self.download_and_install(url)
+            self.download_and_install(url, show_progress=True)
 
     def download_and_install(self, url, show_progress=False):
         """Download installer with optional progress hook."""
@@ -71,11 +71,18 @@ class AutoUpdater:
 
             if show_progress:
                 # Create a top-level window for progress
+                from .utils import center_window
                 progress_window = ctk.CTkToplevel(self.parent)
                 progress_window.title("Downloading Update")
                 progress_window.geometry("400x100")
+                try:
+                    center_window(progress_window, 400,100)
+                    progress_window.transient(self.parent)
+                    progress_window.lift()
+                except:
+                    pass
                 progress_label = ctk.CTkLabel(
-                    progress_window, text="Downloading...")
+                    progress_window, text="Downloading... This might take a few minutes.")
                 progress_label.pack(pady=10)
                 progress_bar = ctk.CTkProgressBar(progress_window, width=350)
                 progress_bar.set(0)
@@ -108,4 +115,8 @@ class AutoUpdater:
             logging.error(f"Update failed: '{e}'")
             if show_progress:
                 tkmsg.showerror(
-                    f"{APP_SHORT_NAME} Update", f"Update failed:\n'{e}'")
+                    f"{APP_SHORT_NAME} Update", f"Update failed")
+                
+            # Delete to avoid bloatware.
+            if os.path.exists(filename):
+                os.remove(filename)
