@@ -1,19 +1,13 @@
 import customtkinter as ctk
 import tkinter as tk
 import tkinter.messagebox as tkmsg
-from tkinter import simpledialog
 import os
 import json
 
 from scripts.constants import (
-    APP_NAME, APP_VERSION, PASS_FILE, APP_ICON, SETTINGS_FILE,
+    APP_NAME, PASS_FILE, APP_ICON, SETTINGS_FILE,
     TNR_BMTB_SERVER
 )
-from scripts.utils import askstring, clear_all_notes
-from scripts.feedback_collection import FeedbackAPI
-from scripts.license_manager import LicenseManager
-from scripts.auto_updater import AutoUpdater
-
 
 def load_settings():
     if not os.path.exists(SETTINGS_FILE):
@@ -32,6 +26,10 @@ class SettingsWindow(ctk.CTkToplevel):
 
     def __init__(self, parent, cipher):
         super().__init__(parent)
+        from scripts.feedback_collection import FeedbackAPI
+        from scripts.license_manager import LicenseManager
+        from scripts.auto_updater import AutoUpdater
+
         self.title(f"Settings")
         self.geometry("450x450")
         self.wm_iconbitmap(APP_ICON)
@@ -143,6 +141,7 @@ class SettingsWindow(ctk.CTkToplevel):
         connected_to_server(TNR_BMTB_SERVER)
 
     def toggle_startup_lock(self):
+        from scripts.utils import askstring, clear_all_notes
         if self.startup_lock_var.get():
             new_pass = askstring(
                 "Set Password", "Enter a new password:", show="*")
@@ -177,6 +176,7 @@ class SettingsWindow(ctk.CTkToplevel):
         self.updater.check_update_and_prompt()
 
     def confirm_clear_all(self):
+        from scripts.utils import askstring, clear_all_notes
         answer = askstring(
             "Confirm Clear All",
             "Type 'YES' to delete ALL notes permanently:"
@@ -191,6 +191,7 @@ class SettingsWindow(ctk.CTkToplevel):
             tkmsg.showinfo("Success", "All notes deleted successfully!")
 
     def verify_current_password(self):
+        from scripts.utils import askstring, clear_all_notes
         if not os.path.exists(PASS_FILE):
             tkmsg.showerror("Error", "No password set yet.")
             return False
@@ -207,6 +208,7 @@ class SettingsWindow(ctk.CTkToplevel):
             return False
 
     def change_password(self):
+        from scripts.utils import askstring, clear_all_notes
         if not self.verify_current_password():
             return
         new_pass = askstring("New Password", "Enter new password:", show="*")
