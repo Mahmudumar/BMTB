@@ -297,7 +297,7 @@ def build_exe(script_path="note_app.py", d_i=deploy_info):
     exe_dir.mkdir(exist_ok=True)
     cmd = f'pyinstaller --noconfirm -i "{APP_ICON}"'
     cmd += f' --add-data "{APP_ICON};data/imgs" -n "{APP_FULLNAME}"'
-    cmd += f' --noconsole "{script_path}"'
+    cmd += f' -w --hide-console=hide-early "{script_path}"'
     print(cmd)
     os.system(cmd)
     for item in ["build", "__pycache__", f"{APP_FULLNAME}.spec"]:

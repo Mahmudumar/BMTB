@@ -14,17 +14,19 @@ app so that the process of feedback collection is easier
 from datetime import datetime
 import json
 import os
+import re
 import threading
 import pathlib
 import time
+from tkinter.simpledialog import askstring
 import customtkinter as ctk
 import requests
 
-from .constants import (logging,
+from .constants import (EMAIL_ID_FILE, logging,
                         FB_PATH, LOGS_FILE,
                         APP_NAME,
                         BMTB_FEEDBACK_SERVER,
-                        APP_ICON)
+                        APP_ICON, read_json_file, write_json_file)
 from .utils import has_internet
 import tkinter.messagebox as tkmsg
 
@@ -110,6 +112,23 @@ class FeedbackAPI:
         self.helper.configure(text="")
         # self.window.wait_window()
 
+        # Fill the email automatically
+        self.auto_fill()
+
+    def auto_fill(self):
+        """Make it easy for user to continuously focus on 
+        the feedback and not on the email filling"""
+        self.email_name = self.email_entry.get().strip()
+        if os.path.exists(EMAIL_ID_FILE):
+            self.email_name = read_json_file(EMAIL_ID_FILE)["user_email"]
+            logging.error(f"Using stored email: {self.email_name}")
+            self.email_entry.insert('0',self.email_name)
+
+    def validate_email(self, email):
+            return bool(re.match(
+                r"^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$",
+                email))
+
     def _validate(self):
         """Validate user input and return feedback data."""
         self.user_name = self.name_entry.get().strip()
@@ -124,10 +143,13 @@ class FeedbackAPI:
             "timestamp": datetime.now().strftime("%d-%m-%Y, %H:%M:%S"),
             "user_app_log": self.get_app_log()
         }
+        if self.validate_email(self.email_name):
+                    write_json_file(
+                    EMAIL_ID_FILE, {"user_email": self.email_name})
 
-        if not self.body or not self.email_name:
+        if not self.body:
             tkmsg.showerror("Fields required",
-                            "Your email and feedback are required")
+                            "Your feedback is required")
             logging.info("Validation failed: empty name or feedback")
             return self.data, False
 

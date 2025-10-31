@@ -120,3 +120,20 @@ class AutoUpdater:
             # Delete to avoid bloatware.
             if os.path.exists(filename):
                 os.remove(filename)
+    
+    
+    def delete_prev_versions(self):
+        #TODO, delete versions .exe
+        from pathlib import Path
+        import re
+        current_folder = Path(__file__).parent
+        for file in current_folder.iterdir():
+            if not file.is_file():
+                continue
+
+            # print(version.parse(prev_version) < version.parse(APP_VERSION))
+
+            p = re.findall(r"[0-9].[0-9].[0-9]", file.name)
+            if p:
+                if (version.parse(p[0]) < version.parse(APP_VERSION)):
+                    logging.info(f"{file}")

@@ -9,7 +9,6 @@ with license key verification using RSA public key cryptography.
 from scripts.password_manager import (PasswordManager, SimpleCipher,)
 from scripts.constants import (APP_NAME,
                                APP_ICON, APP_VERSION,
-
                                PASS_FILE,
                                logging,)
 
@@ -30,15 +29,16 @@ class NotesApp(ctk.CTk):
         """Initialize the NotesApp, load settings, password, freemium checks, and UI"""
         super().__init__()
 
+        self.init_settings()
+        self.init_managers()
+        self.start_ui()
+        
         # Database
         try:
             create_table()
         except Exception as e:
             logging.error(f"Error while creating table: {e}")
 
-        self.init_settings()
-        self.init_managers()
-        self.start_ui()
 
         self.current_note = ""
         self.autosave_after_id = None

@@ -162,19 +162,20 @@ class LicenseManager:
                 "Unlock the full version to enjoy:\n"
                 "• Premium features: Unlimited Notes\n"
                 "• A smoother, distraction-free experience\n\n"
-                "To activate, please paste:\n"
-
-                "• Your License Key\n\n"
-                "If you don’t have a license yet, click below to purchase one."
+                "To activate, please paste your License Key below\n\n\n"
+                "If you don’t have a license yet, click below to purchase one.\n\n"
+                f"The license costs: {PREMIUM_PRICE:,d} Naira only"
             ),
             justify="left",
             wraplength=480
         )
+        # TODO: Add pricing buttons to choose from if possible
+
 
         instructions.pack(pady=(10, 0), padx=10, anchor="w")
 
         link_label = ctk.CTkLabel(
-            self.license_window, text="Purchase License",
+            self.license_window, text=f"Purchase License",
             text_color="#6b9eda",
             cursor="hand2", justify="left"
         )
