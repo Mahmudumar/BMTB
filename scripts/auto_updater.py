@@ -15,9 +15,10 @@ from .constants import (logging, APP_VERSION,
 
 
 class AutoUpdater:
-    def __init__(self, parent, auto_install=True):
+    def __init__(self, parent, auto_install=True, show_if_up_to_date=False):
         self.parent = parent
         self.auto_install = auto_install
+        self.show_uptodate = show_if_up_to_date
         os.makedirs(UPDATE_DOWNLOAD_FOLDER, exist_ok=True)
 
     def check_update_background(self):
@@ -47,11 +48,10 @@ class AutoUpdater:
                     self.prompt_update(latest_version, notes, url)
             else:
                 logging.info("Software up to date")
-                if not self.auto_install:
+                if not self.auto_install and self.show_uptodate:
                     tkmsg.showinfo("Up to Date",f"Your {APP_NAME} is up to date")
 
         except Exception as e:
-            # Silent fail for background updates
             logging.error(f"Update check failed: {e}")
 
     def prompt_update(self, latest_version, notes, url):

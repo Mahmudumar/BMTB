@@ -33,7 +33,7 @@ APP_NAME = "Thought Book"
 # for now, manually change
 # the version to match the
 # update.json and the deploy.
-APP_VERSION = "10.0.0" # this is changed by the
+APP_VERSION = "1.0.3" # this is changed by the
 APP_SHORT_NAME = "BMTB"
 
 

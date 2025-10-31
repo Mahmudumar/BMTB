@@ -43,7 +43,7 @@ class SettingsWindow(ctk.CTkToplevel):
         self.settings = load_settings()
         self.feedback_manager = FeedbackAPI(self)
         self.license_manager = LicenseManager(self)
-        self.updater = AutoUpdater(self, False)
+        self.updater = AutoUpdater(self, False, True)
 
         # --- Theme palette ---
         self.colors = {

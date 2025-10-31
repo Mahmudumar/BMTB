@@ -32,13 +32,12 @@ class NotesApp(ctk.CTk):
         self.init_settings()
         self.init_managers()
         self.start_ui()
-        
+
         # Database
         try:
             create_table()
         except Exception as e:
             logging.error(f"Error while creating table: {e}")
-
 
         self.current_note = ""
         self.autosave_after_id = None
@@ -73,8 +72,8 @@ class NotesApp(ctk.CTk):
         self.license_manager = LicenseManager(self)
 
         # App Update Management
-        self.updater = AutoUpdater(self, True)  # will just auto install
-        logging.info(f"Current Version: {APP_VERSION}")
+        self.updater = AutoUpdater(self, False, False)
+        logging.info(f"Current App Version: {APP_VERSION}")
         # check after startup delay
         self.after(2000, self.updater.check_update_background)
 
