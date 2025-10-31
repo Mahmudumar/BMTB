@@ -292,7 +292,7 @@ SectionEnd
 # Build executable
 
 
-def build_exe(script_path="note_app.py", d_i=deploy_info):
+def build_exe(script_path="main.py", d_i=deploy_info):
     exe_dir = Path("dist")
     exe_dir.mkdir(exist_ok=True)
     cmd = f'pyinstaller --noconfirm -i "{APP_ICON}"'

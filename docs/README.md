@@ -76,7 +76,7 @@ It provides a clean and modern interface for creating, editing, and managing not
 ```
 Thought_Book/
 │── deploy.py        # Deployment script (builds exe + shortcut)
-│── notes_app.py     # Main NotesApp source code
+│── main.py     # Main NotesApp source code
 │── utils.py         #SQLite helper
 │── pass.pass        # Stored password hash
 │── recovery.key     # Recovery code hash

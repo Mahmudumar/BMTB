@@ -42,7 +42,7 @@ thought_book/
    ```
 3. **Build and run the app:**
    - Run `python deploy.py` to build the installer and create shortcuts.
-   - Or run `python note_app.py` directly for development.
+   - Or run `python main.py` directly for development.
 
 ## Usage
 

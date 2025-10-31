@@ -1,24 +1,8 @@
-# note_app.py
-"""
-Freemium version of the application implemented correctly
-with license key verification using RSA public key cryptography.
-"""
-
-# This key must be have been generated at the same time as the private key
-# used to sign the license keys. Otherwise, license verification will fail.
-from scripts.password_manager import (PasswordManager, SimpleCipher,)
+import customtkinter as ctk
 from scripts.constants import (APP_NAME,
                                APP_ICON, APP_VERSION,
                                PASS_FILE,
                                logging,)
-
-from scripts.utils import (center_window, create_table,
-                           delete_note,
-                           get_notes,
-                           save_note)
-from scripts.settings import (SettingsWindow, load_settings)
-from scripts.license_manager import LicenseManager
-from scripts.auto_updater import AutoUpdater
 import sys
 import customtkinter as ctk
 from tkinter import messagebox as tkmsg
@@ -35,6 +19,7 @@ class NotesApp(ctk.CTk):
 
         # Database
         try:
+            from scripts.utils import (create_table)
             create_table()
         except Exception as e:
             logging.error(f"Error while creating table: {e}")
@@ -44,6 +29,7 @@ class NotesApp(ctk.CTk):
 
     # --- Managers and settings ---
     def init_settings(self):
+        from scripts.settings import (load_settings)
         settings = load_settings()
         self.locked = settings.get("request_password", False)
         if self.locked:
@@ -58,6 +44,10 @@ class NotesApp(ctk.CTk):
         self.focused = ctk.BooleanVar(value=False)
 
     def init_managers(self):
+        from scripts.password_manager import (PasswordManager, SimpleCipher,)
+        from scripts.license_manager import LicenseManager
+        from scripts.auto_updater import AutoUpdater
+
         # Security
         self.cipher = SimpleCipher()
         self.encrypt = self.cipher.encrypt
@@ -81,6 +71,7 @@ class NotesApp(ctk.CTk):
 
     def start_ui(self):
         """Initialize and layout the UI components"""
+        from scripts.settings import (SettingsWindow)
         if self.locked:
             return
 
@@ -209,6 +200,7 @@ class NotesApp(ctk.CTk):
 
     def load_notes(self) -> list:
         """Load all notes from the database."""
+        from scripts.utils import (get_notes)
         return get_notes()
 
     def add_note(self):
@@ -245,6 +237,7 @@ class NotesApp(ctk.CTk):
         self.title_entry.focus()
 
     def save_current_note(self, index_to_save=None):
+        from scripts.utils import (save_note)
         """Save the current note or a specified note index to the database."""
         idx, content = self.get_current_note(index_to_save)
         content_encrypted = self.encrypt(content)
@@ -307,6 +300,7 @@ class NotesApp(ctk.CTk):
 
     def delete_note(self):
         """Delete the current note after confirmation."""
+        from scripts.utils import (delete_note)
         if self.current_index is None:
             return
 
@@ -351,11 +345,11 @@ class NotesApp(ctk.CTk):
 
 
 def main():
+    from scripts.utils import (center_window)
     ctk.set_appearance_mode("dark")
     app = NotesApp()
     center_window(app, 900, 500)
     app.mainloop()
-
 
 if __name__ == "__main__":
     main()
