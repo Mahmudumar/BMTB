@@ -64,135 +64,7 @@ start = confirm_version(deploy_info)
 APP_FULLNAME = f"{deploy_info['APP_NAME']} {deploy_info['APP_VERSION']}"
 
 # NSIS installer template
-NSIS_INSTALLER_TEMPLATE_ = r"""
-!include "MUI2.nsh"
-!include nsDialogs.nsh
 
-
-Name "{APP_FULLNAME}"
-OutFile "dist\{finished_app_installer}"
-InstallDir "$LOCALAPPDATA\BM\{APP_SHORT_NAME}"
-RequestExecutionLevel user
-
-;--------------------------------
-; Modern UI Settings
-!define MUI_ABORTWARNING
-!define MUI_ICON {APP_ICON}
-!define MUI_UNICON {APP_ICON}
-!define MUI_HEADERIMAGE
-!define MUI_HEADERIMAGE_BITMAP .\\imgs\\banner_h.bmp
-!define MUI_WELCOMEFINISHPAGE_BITMAP .\\imgs\\banner_v.bmp
-
-
-BrandingText "TNR Software"
-
-;--------------------------------
-; Pages
-!insertmacro MUI_PAGE_WELCOME
-!insertmacro MUI_PAGE_DIRECTORY
-!insertmacro MUI_PAGE_INSTFILES
-!insertmacro MUI_PAGE_FINISH 
-
-!define MUI_FINISHPAGE_SHOW "LaunchPage"
-!define MUI_FINISHPAGE_LEAVE "Finish"
-
-
-!insertmacro MUI_UNPAGE_CONFIRM
-!insertmacro MUI_UNPAGE_INSTFILES
-!insertmacro MUI_UNPAGE_FINISH
-
-!insertmacro MUI_LANGUAGE "English"
-
-Var LaunchCheckbox
-
-; Function 'LaunchPage' will now be called by MUI_FINISHPAGE_SHOW
-Function LaunchPage
-    nsDialogs::Create 1018
-    Pop $0
-    ${{If}} $0 == error
-        Abort
-    ${{EndIf}}
-
-    ; Create the checkbox
-    ${{NSD_CreateCheckBox}} 20u 20u 200u 12u "Launch {APP_NAME}"
-    Pop $LaunchCheckbox
-    ${{NSD_SetState}} $LaunchCheckbox 1 ; checked by default
-
-    nsDialogs::Show
-FunctionEnd
-
-; Function 'Finish' will now be called by MUI_FINISHPAGE_LEAVE
-Function Finish
-    ; Check if checkbox is checked and launch app
-    ${{NSD_GetState}} $LaunchCheckbox $0
-    StrCmp $0 1 LaunchApp Done
-    Done:
-    Return
-
-    LaunchApp:
-    Exec "$INSTDIR\{APP_FULLNAME}.exe"
-FunctionEnd
-
-
-;--------------------------------
-Section "Install"
-    SetOutPath "$INSTDIR"
-    File "dist\{APP_FULLNAME}.exe"
-
-    ; Start Menu shortcut
-    CreateDirectory "$SMPROGRAMS\{APP_NAME}"
-    
-    CreateShortCut "$SMPROGRAMS\{APP_NAME}\{APP_NAME}.lnk"\
-    "$INSTDIR\{APP_FULLNAME}.exe" "" "$INSTDIR\{APP_FULLNAME}.exe" 0 SW_SHOWNORMAL "CTRL|ALT|T" "A place to store your thoughts"
-
-    ; Desktop shortcut
-    CreateShortCut "$DESKTOP\{APP_NAME}.lnk"\
-    "$INSTDIR\{APP_FULLNAME}.exe" "" "$INSTDIR\{APP_FULLNAME}.exe" 0 SW_SHOWNORMAL "CTRL|ALT|T" "A place to store your thoughts"
-
-    ; Write uninstaller
-    WriteUninstaller "$INSTDIR\Uninstall_{APP_SHORT_NAME}.exe"
-
-    ; ----------------------------
-
-    ; Set a unique variable for your app's install path
-    WriteRegExpandStr HKCU "Environment" "{APP_SHORT_NAME}" "$INSTDIR"
-
-    ; Notify system about env change
-    System::Call 'user32::SendMessageTimeout(i ${{HWND_BROADCAST}}, i ${{WM_SETTINGCHANGE}}, i 0, t "Environment", i 0, i 1000, *i .r0)'
-
-
-    ; Add registry for Add/Remove Programs
-    WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\{APP_NAME}" "DisplayName" "{APP_NAME}"
-    WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\{APP_NAME}" "DisplayVersion" "{APP_VERSION}"
-    WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\{APP_NAME}" "UninstallString" "$INSTDIR\Uninstall_{APP_SHORT_NAME}.exe"
-    WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\{APP_NAME}" "InstallLocation" "$INSTDIR"
-    WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\{APP_NAME}" "Publisher" "TNR Software"
-    WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\{APP_NAME}" "DisplayIcon" "$INSTDIR\{APP_FULLNAME}.exe"
-
-SectionEnd
-
-Section "Uninstall"
-    Delete "$INSTDIR\{APP_FULLNAME}.exe"
-    Delete "$SMPROGRAMS\{APP_NAME}\{APP_NAME}.lnk"
-    RMDir "$SMPROGRAMS\{APP_NAME}"
-    Delete "$DESKTOP\{APP_NAME}.lnk"
-
-
-    ; ----------------------------
-    ; Remove the unique variable
-    DeleteRegValue HKCU "Environment" "{APP_SHORT_NAME}"
-
-    ; Notify system about env change
-    System::Call 'user32::SendMessageTimeout(i ${{HWND_BROADCAST}}, i ${{WM_SETTINGCHANGE}}, i 0, t "Environment", i 0, i 1000, *i .r0)'
-
-    
-    ; Remove registry entry
-    DeleteRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\{APP_NAME}"
-
-    RMDir /r "$INSTDIR"
-SectionEnd
-
-"""
 NSIS_INSTALLER_TEMPLATE = r"""
 
 !include "MUI2.nsh"
@@ -291,6 +163,9 @@ SectionEnd
 """
 # Build executable
 
+output_dir = Path("C:\\Users\\USER\\Documents\\PROGRAMMING\\FINISHED APPS")
+output_dir.mkdir(exist_ok=True)
+
 
 def build_exe(script_path="main.py", d_i=deploy_info):
     exe_dir = Path("dist")
@@ -351,6 +226,8 @@ def update_version_number(num):
         print(f"Failed with constants.py: {e}")
         reminder_crucial()
 
+
+
 def main():
     print(
         f"\n{'-'*60}\nMaking {start} changes to the app...\nVersion: {deploy_info['APP_VERSION']}\n{'-'*60}\n")
@@ -367,8 +244,7 @@ def main():
     compile_installer(nsi_path)
     print(f"Installer built successfully: '{finished_installer}'")
 
-    output_dir = Path("C:\\Users\\USER\\Documents\\PROGRAMMING\\FINISHED APPS")
-    output_dir.mkdir(exist_ok=True)
+    
     installer_path = Path("dist") / finished_installer
     if installer_path.exists():
         shutil.move(str(installer_path), str(output_dir / finished_installer))
@@ -387,11 +263,22 @@ def reminder_crucial():
     print("*"*60)
     print()
 
-
+def open_output_folder(path):
+    import os
+    try:
+        # This command uses the default application for the path, 
+        # which is File Explorer for a folder.
+        os.startfile(path)
+    except FileNotFoundError:
+        print(f"Error: Folder not found at {path}")
+    # Downsides: This will not select/highlight a specific file. 
+    # It only opens the folder.
 
 if __name__ == "__main__":
-    main()
-    write_json_file(DEPLOY_INFO_PATH, deploy_info)
+    # main()
+    # write_json_file(DEPLOY_INFO_PATH, deploy_info)
+    open_output_folder(output_dir)
+
     
     # optionally modify the constants.py file after everydeploy
     # with the current deploy.
