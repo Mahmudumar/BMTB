@@ -2,7 +2,9 @@ import hashlib
 import string
 import tkinter.messagebox as tkmsg
 
-from scripts.utils import verify_recovery_key, askstring, set_recovery_key
+from scripts.utils import (verify_recovery_key,
+                           askstring,
+                           set_recovery_key)
 
 
 class PasswordManager:
@@ -20,6 +22,7 @@ class PasswordManager:
 
         if code is None:
             return False
+        
         if code.lower() == "exit":
             exit()
 

@@ -18,7 +18,7 @@ import re
 import threading
 import pathlib
 import time
-from tkinter.simpledialog import askstring
+
 import customtkinter as ctk
 import requests
 
@@ -121,7 +121,7 @@ class FeedbackAPI:
         self.email_name = self.email_entry.get().strip()
         if os.path.exists(EMAIL_ID_FILE):
             self.email_name = read_json_file(EMAIL_ID_FILE)["user_email"]
-            logging.error(f"Using stored email: {self.email_name}")
+            logging.error(f"Using user's stored email")
             self.email_entry.insert('0',self.email_name)
 
     def validate_email(self, email):
@@ -143,6 +143,7 @@ class FeedbackAPI:
             "timestamp": datetime.now().strftime("%d-%m-%Y, %H:%M:%S"),
             "user_app_log": self.get_app_log()
         }
+
         if self.validate_email(self.email_name):
                     write_json_file(
                     EMAIL_ID_FILE, {"user_email": self.email_name})

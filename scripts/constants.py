@@ -33,7 +33,7 @@ APP_NAME = "Thought Book"
 # for now, manually change
 # the version to match the
 # update.json and the deploy.
-APP_VERSION = "1.0.5"
+APP_VERSION = "1.0.7"
 APP_SHORT_NAME = "BMTB"
 
 
@@ -82,7 +82,7 @@ EMAIL_ID_FILE = HIDDEN_FOLDER / "email_config.json"
 
 # For updates system
 DEPLOY_INFO_PATH = HIDDEN_FOLDER / "deploy.info"
-UPDATE_INFO_URL = "https://tech-naija-rise.github.io/thought_book/update.json"
+UPDATE_INFO_URL = "https://tech-naija-rise.github.io/BMTB/update.json"
 
 
 NOTES_DB = NOTES_FOLDER / "BMTbnotes.db"
@@ -175,7 +175,9 @@ UPDATE_DOWNLOAD_FOLDER = os.path.join(
 
 # --- External Links ---
 BMA_DOWNLOAD_LINK = "https://github.com/Mahmudumar/BMA/releases/latest"
-BMTB_DOWNLOAD_LINK = "https://github.com/Mahmudumar/thought_book/releases"
+BMTB_DOWNLOAD_LINK = "https://github.com/tech-naija-rise/BMTB/releases/latest"
+BMTB_DOWNLOAD_LINK2 = "https://tech-naija-rise.github.io/BMTB_webpage/"
+
 BMTB_FEEDBACK_SERVER = "https://feedback-server-tnr.onrender.com/feedback"
 TNR_BMTB_SERVER = "https://feedback-server-tnr.onrender.com"
 

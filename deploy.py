@@ -1,5 +1,4 @@
 # deploy.py
-import json
 import os
 import shutil
 from pathlib import Path
@@ -275,10 +274,8 @@ def open_output_folder(path):
     # It only opens the folder.
 
 if __name__ == "__main__":
-    # main()
-    # write_json_file(DEPLOY_INFO_PATH, deploy_info)
+    main()
+    write_json_file(DEPLOY_INFO_PATH, deploy_info)
     open_output_folder(output_dir)
-
-    
     # optionally modify the constants.py file after everydeploy
     # with the current deploy.

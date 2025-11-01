@@ -1,8 +1,11 @@
+import re
+import logging
 import requests
 import os
 import subprocess
 import threading
 
+from pathlib import Path
 from packaging import version
 
 import customtkinter as ctk
@@ -12,6 +15,7 @@ from .constants import (logging, APP_VERSION,
                         APP_NAME, APP_SHORT_NAME,
                         UPDATE_DOWNLOAD_FOLDER,
                         UPDATE_INFO_URL)
+
 
 
 class AutoUpdater:
@@ -49,7 +53,8 @@ class AutoUpdater:
             else:
                 logging.info("Software up to date")
                 if not self.auto_install and self.show_uptodate:
-                    tkmsg.showinfo("Up to Date",f"Your {APP_NAME} is up to date")
+                    tkmsg.showinfo(
+                        "Up to Date", f"Your {APP_NAME} is up to date")
 
         except Exception as e:
             logging.error(f"Update check failed: {e}")
@@ -76,7 +81,7 @@ class AutoUpdater:
                 progress_window.title("Downloading Update")
                 progress_window.geometry("400x100")
                 try:
-                    center_window(progress_window, 400,100)
+                    center_window(progress_window, 400, 100)
                     progress_window.transient(self.parent)
                     progress_window.lift()
                 except:
@@ -107,33 +112,51 @@ class AutoUpdater:
             # self.parent.destroy()  # Close app to allow installer
             if show_progress:
                 tkmsg.showinfo(("Successfully installed "
-                            f"{APP_SHORT_NAME} Updates"),
-                            ("You can always restart the app to install"
-                            " updates"))
+                                f"{APP_SHORT_NAME} Updates"),
+                               ("You can always restart the app to install"
+                                " updates"))
             logging.info(f"Finished installation: '{filename}'")
         except Exception as e:
             logging.error(f"Update failed: '{e}'")
             if show_progress:
                 tkmsg.showerror(
                     f"{APP_SHORT_NAME} Update", f"Update failed")
-                
-            # Delete to avoid bloatware.
+
+            # Delete if failed to avoid bloatware.
             if os.path.exists(filename):
                 os.remove(filename)
-    
-    
-    def delete_prev_versions(self):
-        #TODO, delete versions .exe
-        from pathlib import Path
-        import re
+
+    def delete_prev_versions(self, APP_VERSION):
         current_folder = Path(__file__).parent
+        new_version_detected = False
+
+        # Check if the new version is installed
         for file in current_folder.iterdir():
             if not file.is_file():
                 continue
 
-            # print(version.parse(prev_version) < version.parse(APP_VERSION))
+            match = re.search(r"([0-9]+\.[0-9]+\.[0-9]+)", file.name)
+            if match:
+                file_version = version.parse(match.group(1))
+                if file_version == version.parse(APP_VERSION):
+                    new_version_detected = True
+                    break
 
-            p = re.findall(r"[0-9].[0-9].[0-9]", file.name)
-            if p:
-                if (version.parse(p[0]) < version.parse(APP_VERSION)):
-                    logging.info(f"{file}")
+        # If the new version is confirmed, delete older versions
+        if new_version_detected:
+            for file in current_folder.iterdir():
+                if not file.is_file():
+                    continue
+
+                match = re.search(r"([0-9]+\.[0-9]+\.[0-9]+)", file.name)
+                if match:
+                    file_version = version.parse(match.group(1))
+                    if (file_version < version.parse(APP_VERSION)):
+                        try:
+                            file.unlink()
+                            logging.info(f"Deleted old version: {file.name}")
+                        except Exception as e:
+                            logging.error(f"Failed to delete {file.name}: {e}")
+        else:
+            logging.info("New version not detected. No files deleted.")
+
