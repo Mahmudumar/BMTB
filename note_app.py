@@ -294,7 +294,7 @@ And a hint to help you remember.
 {boost}
 When you want to write sensitive notes, don't use notepad.
 
-Lock your all notes in {APP_NAME}.""")
+Instead, lock all your notes in {APP_NAME}.""")
 
                 a.setIcon(a.Icon.Information)
                 lock = a.addButton("Secure Notes", a.ButtonRole.AcceptRole)

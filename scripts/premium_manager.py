@@ -2,12 +2,12 @@ from PyQt5.QtCore import QSettings
 
 
 class PremiumTracker(QSettings):
-    PREMIUM_REMINDERS_GIVEN = "premium_reminders_given"
-    PREMIUM_LICENSE_KEY = "license_key"
-    PREMIUM_NOTE_COUNT = "note_count"
+    PREMIUM_REMINDERS_GIVEN = "PremiumTracker/premium_reminders_given"
+    PREMIUM_LICENSE_KEY = "PremiumTracker/license_key"
+    PREMIUM_NOTE_COUNT = "PremiumTracker/note_count"
 
     def __init__(self, db, parent=None):
-        super().__init__("BM", "BMTB/PremiumTracker", parent=None)
+        super().__init__("BM", "BMTB", parent=None)
         self.db = db
         self.master = parent
 

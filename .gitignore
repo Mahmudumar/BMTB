@@ -22,3 +22,10 @@ ac.py
 .vscode
 *.md
 !README.md
+*.db
+*.bmtb
+.env
+*.key
+logs/
+__pycache__/
+venv/
