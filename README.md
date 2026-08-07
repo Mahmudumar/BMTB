@@ -17,7 +17,7 @@ Most note apps are slow, online-dependent, insecure, and leave your notes scatte
 - **Instant launch** with a global shortcut.  
 - **Offline-only** by design — works currently on PC.  
 - **Local encryption** to keep your notes private.  
-- **Optional backup** (lightly encrypted) to Google Drive.  
+- **Optional backup** (encrypted) to Google Drive.  
 
 👉 [Download the latest release](https://github.com/Tech-Naija-Rise/thought_book/releases/latest)  
 
