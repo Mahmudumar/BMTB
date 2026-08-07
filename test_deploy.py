@@ -50,7 +50,7 @@ def create_shortcut(target, shortcut_path, hotkey=None, workdir=None, descriptio
 
 def main():
     # 1. Build exe
-    exe_path = build_exe("notes_app.py")
+    exe_path = build_exe("note_app.py")
     print(f"Built exe at: {exe_path}")
 
     # 2. Create shortcut on Desktop

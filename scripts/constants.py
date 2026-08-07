@@ -28,12 +28,25 @@ lQIDAQAB
 
 """
 
+NOTE_CRYPTOGRAPHIC_PUBLIC_KEY = """-----BEGIN PUBLIC KEY-----
+MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA21jrh5SHrXJ77575825l
+HyPpNrlCr9CGXJafMawjhz1w2OhvWHIWeKy1z/lyxTIsSa+Lk6+Dcnvxumxuz+1j
+xh1aOqcoiZL0DYfiFrK8Qs5GOi85Bum+FA5aE0RGQu0VmPic2Z6n9IZGjW7PuVvZ
+XSJ/e5bDoOWH8+YyzN+NwA9jKce4hvSkdMEoGvCcp4QbIVKqUdn9a3xWUSCZxNDW
+E0mJkjTp6MeKgSWSBGdWBB9OXTu33qMsJUkYoTIfYezns3uJ0qW/x+63V4z6mspz
+8x/mukmmIMyQPYP/sqKMPRcftYVdJRD2tvkhHeBmgTTC6FjPNqlcE8gOoG8sqmb9
+6wIDAQAB
+-----END PUBLIC KEY-----"""
+
+NOTE_CRYPTOGRAPHIC_KEY = """yESHqIu4aRrvpj1vPyaKp8cYLbZcmoLUQ46gMtjAq8o="""
+
+
 # --- App Info ---
 APP_NAME = "Thought Book"
 # for now, manually change
 # the version to match the
 # update.json and the deploy.
-APP_VERSION = "1.0.7"
+APP_VERSION = "2.0.0"
 APP_SHORT_NAME = "BMTB"
 
 
@@ -43,14 +56,15 @@ def resource_path(relative_path="") -> Path:
     """Return absolute path to resource (works for dev & PyInstaller)."""
     try:
         # will run when Deployed
-        base_path= Path("_internal") / "data" / relative_path
+        base_path = Path("_internal") / "data" / relative_path
         if not base_path.exists():
             raise TypeError
     except TypeError:
         # Means it is run in debug mode
-        base_path =  Path(__file__).resolve().parent.parent
+        base_path = Path(__file__).resolve().parent.parent
 
     return base_path
+
 
 # --- Main Folders ---
 MAIN_FOLDER = Path(__file__).resolve().parent.parent
@@ -79,6 +93,8 @@ if not HIDDEN_FOLDER.exists():
 LICENSE_FILE = HIDDEN_FOLDER / "license.json"
 ID_FILE = HIDDEN_FOLDER / "config.json"
 EMAIL_ID_FILE = HIDDEN_FOLDER / "email_config.json"
+LICENSE_MESSAGE_FILE = HIDDEN_FOLDER / "license_msg.json"
+
 
 # For updates system
 DEPLOY_INFO_PATH = HIDDEN_FOLDER / "deploy.info"
@@ -103,14 +119,12 @@ logging.basicConfig(
 )
 
 
-
 def write_json_file(file, contents={}):
     """Must be in json"""
     try:
-        
+
         with open(file, "w") as w:
             json.dump(contents, w)
-        
     except Exception as e:
         logging.error(e)
 
@@ -118,10 +132,10 @@ def write_json_file(file, contents={}):
 def read_json_file(file):
     """Must be in json"""
     try:
-       
+
         with open(file, "r") as r:
             contents = dict(json.load(r))
-        
+
         return contents
     except Exception as e:
         logging.error(e)
@@ -155,6 +169,7 @@ def get_device_id(config_file):
     # Generate new UUID and save it
     device_id = str(uuid.uuid4())
     write_json_file(config_file, {"device_id": device_id})
+    # TODO: also save in reg
     return device_id
 
 
@@ -165,7 +180,21 @@ def get_device_id(config_file):
 # installation of bmtb
 # config for unique device id
 
-PREMIUM_PRICE = 10_000
+LICENSE_AMOUNT = 10_000
+LICENSE_MESSAGE = f"""\
+Welcome to {APP_NAME}!
+You are currently using the free version.\n
+Unlock the full version to enjoy:\n
+    • Unlimited Notes
+    • Autolock your thought book when you forget and leave thought book open.
+
+To activate, please paste your License Key below.
+
+If you don’t have a license yet, click below to purchase one.
+"""
+MAX_NOTE_AMOUNT = 5
+PREMIUM_FEATURES = ["unlimited_notes", "autolock"]
+MAX_REMINDER_ABOUT_UPGRADE = 3
 
 
 # AutoUpdater
@@ -180,6 +209,7 @@ BMTB_DOWNLOAD_LINK2 = "https://tech-naija-rise.github.io/BMTB_webpage/"
 
 BMTB_FEEDBACK_SERVER = "https://feedback-server-tnr.onrender.com/feedback"
 TNR_BMTB_SERVER = "https://feedback-server-tnr.onrender.com"
+# TNR_BMTB_SERVER_TEST = "http://localhost:5555"
 
 
 if __name__ == "__main__":

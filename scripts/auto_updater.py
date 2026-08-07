@@ -8,14 +8,13 @@ import threading
 from pathlib import Path
 from packaging import version
 
-import customtkinter as ctk
-from tkinter import messagebox as tkmsg
+
+from PyQt5.QtWidgets import QMessageBox
 
 from .constants import (logging, APP_VERSION,
                         APP_NAME, APP_SHORT_NAME,
                         UPDATE_DOWNLOAD_FOLDER,
                         UPDATE_INFO_URL)
-
 
 
 class AutoUpdater:
@@ -53,7 +52,7 @@ class AutoUpdater:
             else:
                 logging.info("Software up to date")
                 if not self.auto_install and self.show_uptodate:
-                    tkmsg.showinfo(
+                    QMessageBox.information(None,
                         "Up to Date", f"Your {APP_NAME} is up to date")
 
         except Exception as e:
@@ -63,10 +62,11 @@ class AutoUpdater:
         """Ask user for update, non-blocking."""
         msg = (f"{APP_NAME} v{latest_version} is "
                "available.\nDo you want to update now?")
-        if tkmsg.askyesno(f"{APP_SHORT_NAME} Update", msg):
-            self.download_and_install(url, show_progress=True)
+        
+        if QMessageBox.information(None,f"{APP_SHORT_NAME} Update", msg):
+            self.download_and_install(url)
 
-    def download_and_install(self, url, show_progress=False):
+    def download_and_install(self, url):
         """Download installer with optional progress hook."""
         filename = os.path.join(UPDATE_DOWNLOAD_FOLDER, url.split("/")[-1])
         try:
@@ -74,53 +74,18 @@ class AutoUpdater:
             total_size = int(r.headers.get('content-length', 0))
             downloaded = 0
 
-            if show_progress:
-                # Create a top-level window for progress
-                from .utils import center_window
-                progress_window = ctk.CTkToplevel(self.parent)
-                progress_window.title("Downloading Update")
-                progress_window.geometry("400x100")
-                try:
-                    center_window(progress_window, 400, 100)
-                    progress_window.transient(self.parent)
-                    progress_window.lift()
-                except:
-                    pass
-                progress_label = ctk.CTkLabel(
-                    progress_window, text="Downloading... This might take a few minutes.")
-                progress_label.pack(pady=10)
-                progress_bar = ctk.CTkProgressBar(progress_window, width=350)
-                progress_bar.set(0)
-                progress_bar.pack(pady=10)
-
             with open(filename, 'wb') as f:
                 logging.info("Downloading update")
                 for chunk in r.iter_content(chunk_size=8192):
                     if chunk:
                         f.write(chunk)
                         downloaded += len(chunk)
-
-                        if show_progress:
-                            # Update progress bar
-                            progress_bar.set(downloaded / total_size)
-                            progress_window.update()  # refresh GUI
-            if show_progress:
-                progress_window.destroy()  # close progress window
-
             # Run installer
             subprocess.Popen([filename, "/S"], shell=True)
-            # self.parent.destroy()  # Close app to allow installer
-            if show_progress:
-                tkmsg.showinfo(("Successfully installed "
-                                f"{APP_SHORT_NAME} Updates"),
-                               ("You can always restart the app to install"
-                                " updates"))
+
             logging.info(f"Finished installation: '{filename}'")
         except Exception as e:
             logging.error(f"Update failed: '{e}'")
-            if show_progress:
-                tkmsg.showerror(
-                    f"{APP_SHORT_NAME} Update", f"Update failed")
 
             # Delete if failed to avoid bloatware.
             if os.path.exists(filename):
@@ -159,4 +124,3 @@ class AutoUpdater:
                             logging.error(f"Failed to delete {file.name}: {e}")
         else:
             logging.info("New version not detected. No files deleted.")
-

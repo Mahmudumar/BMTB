@@ -8,6 +8,7 @@ import scripts.constants
 from scripts.constants import (
     APP_NAME,
     APP_ICON,
+    APP_PHOTO,
     APP_VERSION,
     APP_SHORT_NAME,
     DEPLOY_INFO_PATH,
@@ -162,7 +163,8 @@ SectionEnd
 """
 # Build executable
 
-output_dir = Path("C:\\Users\\USER\\Documents\\PROGRAMMING\\FINISHED APPS")
+output_dir = Path(
+    f"{os.path.expanduser("~")}\\Documents\\PROGRAMMING\\FINISHED APPS")
 output_dir.mkdir(exist_ok=True)
 
 
@@ -170,6 +172,7 @@ def build_exe(script_path="main.py", d_i=deploy_info):
     exe_dir = Path("dist")
     exe_dir.mkdir(exist_ok=True)
     cmd = f'pyinstaller --noconfirm -i "{APP_ICON}"'
+    cmd += f' --add-data "{APP_PHOTO};data/imgs"'
     cmd += f' --add-data "{APP_ICON};data/imgs" -n "{APP_FULLNAME}"'
     cmd += f' -w --hide-console=hide-early "{script_path}"'
     print(cmd)
@@ -180,7 +183,7 @@ def build_exe(script_path="main.py", d_i=deploy_info):
             shutil.rmtree(p, ignore_errors=True)
         elif p.is_file():
             p.unlink(missing_ok=True)
-    return exe_dir /f"{APP_FULLNAME}"/ f"{APP_FULLNAME}.exe"
+    return exe_dir / f"{APP_FULLNAME}" / f"{APP_FULLNAME}.exe"
 
 # Write NSIS script
 
@@ -208,6 +211,7 @@ def compile_installer(nsi_path):
 
 # Main deployment flow
 
+
 def update_version_number(num):
     try:
         with open(f"{scripts.constants.__file__}", "r") as r:
@@ -226,7 +230,6 @@ def update_version_number(num):
         reminder_crucial()
 
 
-
 def main():
     print(
         f"\n{'-'*60}\nMaking {start} changes to the app...\nVersion: {deploy_info['APP_VERSION']}\n{'-'*60}\n")
@@ -243,7 +246,6 @@ def main():
     compile_installer(nsi_path)
     print(f"Installer built successfully: '{finished_installer}'")
 
-    
     installer_path = Path("dist") / finished_installer
     if installer_path.exists():
         shutil.move(str(installer_path), str(output_dir / finished_installer))
@@ -262,16 +264,18 @@ def reminder_crucial():
     print("*"*60)
     print()
 
+
 def open_output_folder(path):
     import os
     try:
-        # This command uses the default application for the path, 
+        # This command uses the default application for the path,
         # which is File Explorer for a folder.
         os.startfile(path)
     except FileNotFoundError:
         print(f"Error: Folder not found at {path}")
-    # Downsides: This will not select/highlight a specific file. 
+    # Downsides: This will not select/highlight a specific file.
     # It only opens the folder.
+
 
 if __name__ == "__main__":
     main()

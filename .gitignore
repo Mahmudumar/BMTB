@@ -20,3 +20,6 @@ ac.py
 *.pem
 *.key
 .vscode
+notes.md
+todo.md
+todos.md

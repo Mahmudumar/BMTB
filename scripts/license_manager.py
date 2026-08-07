@@ -1,12 +1,11 @@
-# license_manager.py
-
-# For license management
 import json
 import re
 import threading
 import webbrowser
-import customtkinter as ctk
-import tkinter.messagebox as tkmsg
+from PyQt5.QtWidgets import QDialog, QInputDialog, QLabel, QLineEdit, QMessageBox, QPushButton, QVBoxLayout
+from PyQt5.QtGui import QIcon
+
+
 import os
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding
@@ -14,48 +13,41 @@ import base64
 
 import requests
 
-from scripts.constants import (EMAIL_ID_FILE, LICENSE_FILE,
-                               TNR_BMTB_SERVER,  logging,
-                               APP_ICON, APP_NAME, read_json_file,
-                               get_device_id,
-                               ID_FILE, PUBLIC_KEY,
-                               write_json_file,
-                               PREMIUM_PRICE)
-
-from scripts.utils import askstring, center_window, connected_to_server
+from scripts.constants import (
+    APP_PHOTO, EMAIL_ID_FILE, LICENSE_FILE, LICENSE_MESSAGE, LICENSE_MESSAGE_FILE,
+    TNR_BMTB_SERVER,  logging,
+    APP_NAME, read_json_file,
+    get_device_id,
+    ID_FILE, PUBLIC_KEY,
+    write_json_file)
+from scripts.utils import connected_to_server
+from scripts import Settings
 
 USER_APP_ID = get_device_id(ID_FILE)
 
 
 class LicenseManager:
-    def __init__(self, master) -> None:
+    def __init__(self, master=None) -> None:
         """Managing all license related things. 
         This classed is called in the Notes app.
         """
         self.master = master
 
-        self.cipher = self.master.cipher
         self.license_file = LICENSE_FILE
         self.public_key = PUBLIC_KEY
+
+        self.license_message = LICENSE_MESSAGE
+        self.settings_manager = Settings()
 
         self.is_premium = False
         self.license_data = None
         self.license_key = None
 
-        self.load_and_validate_license()
-
-        # Wake up our server
-        try:
-            connected_to_server(TNR_BMTB_SERVER+"/ping")
-        except Exception as e:
-            logging.error(
-                "While waking up server, something"
-                f" Happened: {e}")
         # Even if there's an error,
         # This would wake it up.
 
     def load_and_validate_license(self):
-        if not os.path.exists(self.license_file):
+        if not self.license_file.exists():
             logging.error("License file corrupted or missing!")
             self.is_premium = False
             return False
@@ -64,33 +56,43 @@ class LicenseManager:
         self.license_data, self.license_key = self.parse_license(data)
 
         if self.verify_signature(self.license_data, self.license_key):
-            logging.error("License file found and valid!")
+            logging.info("License file found and valid!")
             self.is_premium = True
             return True
         else:
             logging.error("License file corrupted or missing!")
-            self.is_premium = False
             os.remove(self.license_file)  # 🚨 remove tampered/invalid license
+            logging.error("Trying reg")
+            self.license_key = self.settings_manager.user_license_key or ""
+            self.license_data = self.settings_manager.user_license_data or ""
+            if self.verify_signature(self.license_data, self.license_key):
+                self.is_premium = True
+                return True
             return False
 
     def activate_license(self, license_data, license_key):
-        """Called when user enters key only"""
+        """Called ONLY when user enters key """
         if self.verify_signature(license_data, license_key):
             self.license_data = license_data
             self.license_key = license_key
             self.is_premium = True
             write_json_file(self.license_file, self.format_license(
                 license_data, license_key))
-            logging.info("Saved license to file.")
-            tkmsg.showinfo(
-                "Success", "License activated successfully! "
-                "You are now a premium user.")
+
+            # store in reg too
+            self.settings_manager.user_license_key = license_key
+            self.settings_manager.user_license_data = license_data
+
+            logging.info("Saved license to file and reg.")
+            QMessageBox.information(None,
+                                    "Success", "License activated successfully! "
+                                    "You are now a premium user.")
             logging.info("Premium mode on.")
             return True
         else:
             self.is_premium = False
-            tkmsg.showerror("License Error",
-                            "Invalid license. Please try again.")
+            QMessageBox.critical(None, "License Error",
+                                 "Invalid license. Please try again.")
             return False
 
     def is_premium_user(self):
@@ -141,75 +143,51 @@ class LicenseManager:
 
     # --- Link and license acquisition ---
 
-    def _show_license_window(self, master):
+    def _show_license_window(self):
         """Display modal license entry window"""
-        self.license_window = ctk.CTkToplevel(master)
-        self.license_window.title(f"Activate {APP_NAME}")
-        # self.license_window.geometry("500x480")
-        try:
-            self.license_window.grab_set()
-        except Exception:
-            pass
-        self.license_window.resizable(False, True)
-        self.license_window.iconbitmap(APP_ICON)
-        center_window(self.license_window, 500, 470, offsety=-150)
+        self.license_window = QDialog(self.master)
+        self.license_window.setWindowIcon(QIcon(str(APP_PHOTO)))
+        self.license_window.setFixedSize(600, 500)
+        self.license_window.setWindowTitle(f"Activate {APP_NAME}")
 
-        instructions = ctk.CTkLabel(
-            self.license_window,
-            text=(
-                f"Welcome to {APP_NAME}!\n\n"
-                "You are currently using the free version.\n\n"
-                "Unlock the full version to enjoy:\n"
-                "• Premium features: Unlimited Notes\n"
-                "• A smoother, distraction-free experience\n\n"
-                "To activate, please paste your License Key below\n\n\n"
-                "If you don’t have a license yet, click below to purchase one.\n\n"
-                f"The license costs: {PREMIUM_PRICE:,d} Naira only"
-            ),
-            justify="left",
-            wraplength=480
-        )
+        self.mainlayout = QVBoxLayout()
+
+        instructions = QLabel(self.license_message, self.license_window,)
+
         # TODO: Add pricing buttons to choose from if possible
 
+        payment_link = (lambda: self.initiate_payment())
 
-        instructions.pack(pady=(10, 0), padx=10, anchor="w")
+        purchase_link = QPushButton("Purchase License")
+        purchase_link.setStyleSheet("background:none;color:#77e;")
+        purchase_link.clicked.connect(payment_link)
 
-        link_label = ctk.CTkLabel(
-            self.license_window, text=f"Purchase License",
-            text_color="#6b9eda",
-            cursor="hand2", justify="left"
-        )
-        link_label.pack(pady=(0, 10), padx=10, anchor="w")
-        link_label.bind("<Button-1>", lambda e: threading.Thread(
-            target=self.initiate_payment, daemon=True).start())
+        license_key_label = QLabel(
+            "License Key:", self.license_window)
+        license_key_entry = QLineEdit(self.license_window)
 
-        # license_data_label = ctk.CTkLabel(
-        #     self.license_window, text="License Data:")
-        # license_data_label.pack(anchor="w", padx=20)
-        # license_data_entry = ctk.CTkTextbox(self.license_window, height=4)
-        # license_data_entry.pack(fill="x", padx=20, pady=(0, 10))
+        license_data_label = QLabel(
+            "License Data:", self.license_window)
+        license_data_entry = QLineEdit(self.license_window)
 
-        license_key_label = ctk.CTkLabel(
-            self.license_window, text="License Key:")
-        license_key_label.pack(anchor="w", padx=20)
-        license_key_entry = ctk.CTkTextbox(self.license_window, height=2)
-        license_key_entry.pack(fill="x", padx=20, pady=(0, 10))
+        submit_btn = QPushButton("Activate", self.license_window)
+        submit_btn.clicked.connect(
+            lambda: self.__submit_license(license_key_entry.text(), license_data_entry.text()))
 
-        submit_btn = ctk.CTkButton(
-            self.license_window,
-            text="Activate",
-            command=lambda: self.__submit_license(license_key_entry)
-        )
-        submit_btn.pack(pady=10)
-        # something to tell the user that it is
-        # loading just as we did in feedback
-        # system.
-        self.status = ctk.CTkLabel(
-            self.license_window, text="",
-            text_color="#f5ca3f")
-        self.status.pack(anchor="w", padx=20)
+        
+        self.status = QLabel(self.license_window)
 
-        # self.license_window.wait_window()
+        self.mainlayout.addWidget(instructions)
+        self.mainlayout.addWidget(purchase_link)
+        self.mainlayout.addWidget(license_key_label)
+        self.mainlayout.addWidget(license_key_entry)
+        self.mainlayout.addWidget(license_data_label)
+        self.mainlayout.addWidget(license_data_entry)
+        self.mainlayout.addWidget(submit_btn)
+        self.mainlayout.addWidget(self.status)
+
+        self.license_window.setLayout(self.mainlayout)
+        self.license_window.exec()
 
     def __ask_email(self):
         """Prompt user for email if not stored
@@ -224,15 +202,18 @@ class LicenseManager:
 
         if not os.path.exists(EMAIL_ID_FILE):
             while True:
-                email = askstring("Email Required for payment",
-                                  "Enter your email (required for payment).\n\n"
-                                  " We'll save it on your computer\n"
-                                  "so you never have to type it again:",height=210)
+                email = QInputDialog.getText(
+                    None,
+                    "Email Required for payment",
+                    "Enter your email (required for payment).\n\n"
+                    "We'll save it on your computer\n"
+                    "so you never have to type it again:"
+                )
+
+                email = email[0]
+
                 if not email:
                     continue  # prompt again if empty
-                elif email == "exit":
-                    logging.warning("Payment process cancelled.")
-                    return
 
                 if validate_email(email):
                     self.user_email = email
@@ -240,14 +221,51 @@ class LicenseManager:
                         EMAIL_ID_FILE, {"user_email": self.user_email})
                     break
                 else:
-                    tkmsg.showerror("Invalid Email",
-                                    "Please enter a valid email address.")
+                    QMessageBox.critical(None, "Invalid Email",
+                                         "Please enter a valid email address.")
         else:
             self.user_email = read_json_file(EMAIL_ID_FILE)["user_email"]
             logging.error(f"Using stored email: {self.user_email}")
 
+    def server_ping_and_price_get(self):
+        """the way to do that is to occasionally delete the file"""
+        # Wake up our server
+        
+
+        try:
+            connected_to_server(TNR_BMTB_SERVER+"/ping")
+        except Exception as e:
+            logging.error(
+                "While waking up server, something"
+                f" Happened: {e}")
+
+        # check for the number of opens and remove after every 2 app opens
+        if self.settings_manager.number_of_opens % 2 == 0:
+            if (LICENSE_MESSAGE_FILE.exists()):
+                os.remove(LICENSE_MESSAGE_FILE)
+        try:
+            if (not LICENSE_MESSAGE_FILE.exists()):
+                if not connected_to_server(TNR_BMTB_SERVER):
+                    resp = requests.get(
+                        f"{TNR_BMTB_SERVER}/licenseinfo").json()
+                    # print(resp)
+                    write_json_file(LICENSE_MESSAGE_FILE, dict(resp))
+
+            lm = read_json_file(LICENSE_MESSAGE_FILE)[
+                'license_message']
+
+            if lm.strip():
+                self.license_message = lm
+                return
+        except Exception as e:
+            logging.error(f"update_license_message: {e}")
+            self.license_message = LICENSE_MESSAGE
+            pass
+
     def __initiate_payment(self):
         """Perform server payment initiation"""
+        def open_link(link):
+            webbrowser.open_new_tab(f"{payment_page_link}")
         try:
             # Since our users just might not have
             # (stable) internet,
@@ -259,12 +277,15 @@ class LicenseManager:
                 # given to you
                 resp = requests.post(
                     f"{TNR_BMTB_SERVER}/payment",
-                    # Here, we have to control
+                    # TODO: Here, we have to control
                     # the price from us not from the
                     # app
-                    json={"amount": PREMIUM_PRICE,
-                          "email": self.user_email,
-                          "device_id": USER_APP_ID})
+
+                    json={
+                        "app_name": APP_NAME,
+                        "email": self.user_email,
+                        "device_id": USER_APP_ID
+                    })
 
                 reference = str(resp.json()["data"]["reference"])
             except Exception as e:
@@ -272,24 +293,27 @@ class LicenseManager:
                     f"Server either sleeping, or internet is slow: {e}")
 
             logging.info(f"Payment initiated, reference: {reference}")
-
-            webbrowser.open_new_tab(resp.json()['data']['authorization_url'])
+            payment_page_link = resp.json()['data']['authorization_url']
+            payment_page_link_btn = QPushButton(
+                f"Open Link: {payment_page_link}")
+            payment_page_link_btn.clicked.connect(
+                lambda: open_link(payment_page_link))
+            self.mainlayout.addWidget(payment_page_link_btn)
             self._update_status(
-                "Payment link opened in browser.",
-                col="#3fbf3f")
+                "Click on the link to open your browser", "#3dff33")
 
         except Exception as e:
             logging.error(f"Error during payment processing: {e}")
-            tkmsg.showerror("Error occured",
-                            "Failed to initiate payment."
-                            " Might be a connection problem."
-                            " Please try again later.")
+            QMessageBox.critical(None, "Error occured",
+                                 "Failed to initiate payment."
+                                 " Might be a connection problem."
+                                 " Please try again later.")
             self._update_status(
                 "Payment process failed. Please try again.", col="#ff3333")
 
-    def _update_status(self, msg, col="#f5ca3f"):
-        self.status.configure(text=msg, text_color=col)
-        self.license_window.update_idletasks()
+    def _update_status(self, msg, col="#ff976a"):
+        self.status.setText(msg)
+        self.status.setStyleSheet(f"color:{col};")
 
     def initiate_payment(self):
         """Start freemium registration/payment flow"""
@@ -302,29 +326,28 @@ class LicenseManager:
                 "Opening payment link. "
                 "It might take some seconds...")
 
-            threading.Thread(target=self.__initiate_payment,
-                             daemon=True).start()
+            self.__initiate_payment()
 
-    def __submit_license(self, key_entry):
+    def __submit_license(self, license_key, license_data):
         """Handle license submission"""
         self._update_status("Verifying license, please wait...")
 
-        # license_data = data_entry.get("1.0", "end-1c").strip()
+        try:
+            license_key = str(license_key)
+            license_data = str(license_data)
 
-        data = str(key_entry.get("1.0", "end-1c").strip()).split("||")
+            if not license_data or not license_key:
+                self._update_status("Required fields missing.", col="#ff3333")
+                QMessageBox.critical(
+                    None,
+                    "Missing Data",
+                    "Both License Data and License Key are required.")
+                return
 
-        license_data = data[1]
-        license_key = data[0]
+            # Loudly declare if license is valid or not
+            self.activate_license(license_data, license_key)
 
-        if not license_data or not license_key:
-            self._update_status("Required fields missing.", col="#ff3333")
-            tkmsg.showerror(
-                "Missing Data",
-                "Both License Data and License Key are required.")
+            self.license_window.destroy()
             return
-
-        # Loudly declare if license is valid or not
-        self.activate_license(license_data, license_key)
-
-        self.license_window.destroy()
-        return
+        except Exception as e:
+            print(e)

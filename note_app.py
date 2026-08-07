@@ -1,355 +1,1003 @@
-import customtkinter as ctk
-from scripts.constants import (APP_NAME,
-                               APP_ICON, APP_VERSION,
-                               PASS_FILE,
-                               logging,)
+
+import re
+import threading
+
+from PyQt5 import QtCore
+from PyQt5.QtCore import QObject, QEvent, QTimer
+from scripts.database_manager import DatabaseManager
+from scripts.license_manager import LicenseManager
 import sys
-import customtkinter as ctk
-from tkinter import messagebox as tkmsg
+
+# import markdown
+from scripts.constants import APP_PHOTO, MAX_REMINDER_ABOUT_UPGRADE, MAX_NOTE_AMOUNT, APP_NAME, NOTES_DB
+
+from scripts.password_manager import PasswordManager
+
+from PyQt5.QtCore import Qt, QTimer
+from PyQt5.QtGui import QFont, QIcon
+
+from PyQt5.QtWidgets import (QApplication, QMainWindow, QMenuBar, QStatusBar, QToolBar, QWidget,
+                             QTextEdit,
+                             QListWidget,
+                             QListWidgetItem,
+                             QPushButton,
+                             QAction,
+                             QHBoxLayout,
+                             QVBoxLayout,
+                             QMessageBox,
+                             QLineEdit)
+
+from scripts.premium_manager import PremiumTracker
+from scripts.settings_manager import Settings, SettingsDialog
 
 
-class NotesApp(ctk.CTk):
-    def __init__(self):
-        """Initialize the NotesApp, load settings, password, freemium checks, and UI"""
+class ActivityMonitor(QObject):
+    def __init__(self, autolock_timer: QTimer, parent=None):
+        super().__init__(parent)
+
+        self.timer = autolock_timer
+        self.timer.start()
+
+    def eventFilter(self, obj, event):
+        if event.type() in (
+            QEvent.Type.MouseMove,
+            QEvent.Type.MouseButtonPress,
+            QEvent.Type.KeyPress,
+            QEvent.Type.Wheel,
+        ):
+            self.timer.start()      # Restart idle timer
+
+        return False
+
+
+class OnBoardingTracker(QObject):
+    def __init__(self, timer: QTimer, parent=None) -> None:
+        super().__init__(parent)
+        self.timer = timer
+        self.keys_pressed = 0
+
+    def eventFilter(self, obj, event):
+        if event.type() in (
+            # QEvent.Type.MouseMove,
+            # QEvent.Type.MouseButtonPress,
+            QEvent.Type.KeyPress,
+            # QEvent.Type.Wheel,
+        ):
+            self.timer.start()
+            print("typed ", self.keys_pressed)
+            self.keys_pressed += 1
+        return False
+
+
+class NoteApp(QMainWindow):
+    def __init__(self, parent: QApplication):
         super().__init__()
+        self.master = parent
 
-        self.init_settings()
-        self.init_managers()
-        self.start_ui()
+        self.db = DatabaseManager()
+        self.settings_manager = Settings(self.db)
+        self.premium_tracker = PremiumTracker(self)
 
-        # Database
+        self.current_note_id = None
+        self.c_title = ""
+        self.c_content = ""
+        self.is_read_mode = False
+        self.notes = []
+
+        self.app_actions = [
+            "New", "Del", "Lock"
+        ]
+
+        self.master.setStyleSheet("""
+QMainWindow, QDialog{
+    background-color: #222222;
+    border: none;
+    color:#eeeeee;
+}
+
+QTextEdit, QLineEdit{
+    background:#282828;
+    border:none;
+    color:#eee;
+}
+
+QPushButton{
+    background:#333333;
+    color:#eeeeee;
+}
+QPushButton:hover{
+    background:#555555;
+    color:#eeeeee;
+}
+QCheckBox{
+    color:#eeeeee;
+}
+QLabel{
+    color:#eeeeee;
+}
+QListWidget{
+    color:#eeeeee;
+    background:#222222;
+    border:none;
+}
+""")
+
+        # We will falsify the is_first_time the moment the user exits the app for the first time.
+        self.main_text_size = self.settings_manager.editor_font_size
+
+        # COUNTERS and VARIABLES
+        self.buy_btn_col_flipper = 0
+        self.times_reminded_about_password_protection = 0
+
+        # Delayed autosave timer
+        self.autosave_timer = QTimer(self)
+        self.autosave_timer.setSingleShot(True)
+        self.autosave_timer.timeout.connect(self.auto_save_note)
+
+        self.license_man = LicenseManager(self)
+        self.license_man.load_and_validate_license()
+
+        if not self.is_premium_user():
+            threading.Thread(target=self.license_man.server_ping_and_price_get,
+                             daemon=True).start()
+
+        self.init_ui()
+        self.show()
+
+        NOO = self.settings_manager.number_of_opens
+        self.settings_manager.number_of_opens = NOO + 1
+
+        self.lock = PasswordManager(
+            self.db, self.settings_manager, parent=self)
+
+        # Autolock Timer
+        if self.settings_manager.autolock_enabled:
+            self.autolock_timer = QTimer(self)
+            if self.is_premium_user():
+                self.autolock_event_listener = ActivityMonitor(
+                    self.autolock_timer, parent=self)
+                self.autolock_timer.timeout.connect(self.lock_app)
+                self.set_autolock_timer_interval()
+                self.master.installEventFilter(self.autolock_event_listener)
+
+        hashes_tampered = [
+            False
+        ]
+
+        # TODO: Another security idea is for the hash to be recognized by every note, we will propagate the hash that locked them and update them everytime the user changes password so that an attacker cannot just create a new hash of a password they know, then put in the stolen database, if there's a mismatch, we will flag that there's an unknown hash in the master_password of the db. We will encrypt the hashes together with the note titles, when the titles are being loaded (after being decrypted, we extract and remove the hash)
+
+        # NOTE: If there's no notes.db we don't have anything to protect. So we can ask for a new password and save it in that NEW db. Encrypt the DB too.
+
+        fresh_install = [
+            (not self.db.get_config("master_password").strip()),
+            (len(self.db.get_all_notes()) < 1)
+        ]
+
+        if all(fresh_install):
+            self.settings_manager.is_first_run = True
+
+        self.onboarding_steps = [
+            "set_password",
+            "set_password_hint",
+            "create_one_note",
+            "write",
+            "manually_lock",
+            "unlock",
+            "congrats"
+        ]
+
+        if self.settings_manager.onbrd_stps_completed >= len(self.onboarding_steps):
+            self.settings_manager.is_first_run = False
+
+        if self.settings_manager.is_first_run:
+            self.begin_onboarding()
+        else:
+            if self.settings_manager.require_password:
+                self.lock_app()
+                self.lock.correct = False
+                self.refresh_notes_list()
+            else:
+                # Unprotected entry
+                self.unlock_app()
+
+    def begin_onboarding(self, next_step="set_password"):
+        """This is recursive in nature. parts of it will call back at the function itself.
+
+        After every if or elif or else block, ensure you call this function with the step you want the user to go to.
+
+        """
+        # "set_password",
+        # "set_password_hint",
+        # "create_one_note",
+        # "write",
+        # "manually_lock",
+        # "unlock",
+        # "congrats"
+        # Onboarding process
+
+        if self.settings_manager.onbrd_stps_completed > len(self.onboarding_steps):
+            self.settings_manager.is_first_run = False
+        print(next_step)
+        if "set_password" == next_step:
+            # NOTE: Must add 'and' logic
+            # XXX: Hackable area:
+
+            if (self.settings_manager.is_first_run):
+                self.lock = PasswordManager(
+                    db=self.db, settings_manager=self.settings_manager, new=True)
+                self.lock.set_message(f"""\
+Welcome to {APP_NAME}
+
+Please set an easy but hard to guess password.
+
+And a hint to help you remember.
+""", "#19d819")
+
+            self.lock.exec()
+            # TODO: also secretly check if there's already a notes db.
+            # already.
+            if not self.lock.correct:
+                sys.exit(0)
+                return
+            self.settings_manager.onbrd_stps_completed = 1
+            self.begin_onboarding("set_password_hint")
+
+        elif "set_password_hint" == next_step:
+            a = QMessageBox(self)
+            a.setWindowTitle("I must remember my Password")
+            a.setText(
+                "Ensure you remember your password and hint, once you forget it, the only way to reset it is to delete all your notes.")
+            a.setIcon(a.Icon.Warning)
+            go_back = a.addButton("Go back", a.ButtonRole.NoRole)
+            go_back.clicked.connect(
+                lambda: self.begin_onboarding("set_password"))
+            a.addButton("Next", a.ButtonRole.AcceptRole)
+            a.exec()
+
+            self.settings_manager.onbrd_stps_completed += 1
+            self.begin_onboarding("create_one_note")
+
+        elif "create_one_note" == next_step:
+            a = QMessageBox(self)
+            a.setWindowTitle("Encrypted and AutoSaved")
+            a.setText("All your notes are saved in one secure place.")
+            a.setIcon(a.Icon.Information)
+            a.addButton("Start Writing", a.ButtonRole.AcceptRole)
+            a.exec()
+
+            self.settings_manager.onbrd_stps_completed += 1
+            self.begin_onboarding("write")
+            pass
+
+        elif "write" == next_step:
+            # self.editor.blockSignals(True)
+            self.title_entry.blockSignals(True)
+            self.title_entry.setText("First Note to Self")
+            self.editor.setPlaceholderText(
+                "Don't fear the blank page... Start with 'Hello' or something controversial. LOL.")
+
+            timer = QTimer(self)
+            timer.setInterval(5_000)
+            tracker = OnBoardingTracker(timer, parent=self)
+            self.master.installEventFilter(tracker)
+
+            def to_next():
+                a = QMessageBox(self)
+
+                boost = ""
+                a.setWindowTitle(
+                    f"Nice But Don't Expose Yourself")
+                if tracker.keys_pressed > 20:
+                    boost = "Nice. That's what I call a piece of art.\n"
+
+                a.setText(f"""\
+{boost}
+When you want to write sensitive notes, don't use notepad.
+
+Lock your all notes in {APP_NAME}.""")
+
+                a.setIcon(a.Icon.Information)
+                lock = a.addButton("Secure Notes", a.ButtonRole.AcceptRole)
+                a.exec()
+
+                timer.stop()
+                self.master.removeEventFilter(tracker)
+                self.settings_manager.onbrd_stps_completed += 1
+                self.begin_onboarding("manually_lock")
+
+            timer.timeout.connect(to_next)
+
+            # wait for user to start writing. When they start and we have move on after celebrating them.
+
+        elif "manually_lock" == next_step:
+            col = "#9b0d0d"
+            self.lock_app_btn.setStyleSheet("""QPushButton{
+            background:#9b0d0d;} QPushButton{ background:#ac1e1e;}""")
+            self.lock_app_btn.clicked.disconnect()
+
+            def onboard_lock():
+                self.editor.blockSignals(True)
+                self.title_entry.blockSignals(True)
+                self.notes_list_widget.clear()
+                self.editor.clear()
+                self.title_entry.clear()
+                self.c_content, self.c_title = "", ""
+                self.current_note_id = None
+                lock = PasswordManager(
+                    self.db, self.settings_manager, parent=self)
+                lock.set_message(
+                    f"Enter your password to unlock your {APP_NAME}.", "#14b324")
+                lock.exec()
+                if not lock.correct:
+                    sys.exit(0)
+                    return
+                self.settings_manager.onbrd_stps_completed += 1
+                self.begin_onboarding("unlock")
+
+            self.lock_app_btn.clicked.connect(lambda: onboard_lock())
+
+        elif "unlock" == next_step:
+            self.lock_app_btn.clicked.disconnect()
+            self.lock_app_btn.setStyleSheet("")
+            self.lock_app_btn.clicked.connect(self.lock_app)
+            self.refresh_notes_list()
+
+            a = QMessageBox(self)
+            a.setWindowTitle("Well Done and Welcome")
+            a.setText(
+                f"Welcome to {APP_NAME}! It is a more private alternative to notepad for avid note-takers like you.")
+            a.setIcon(a.Icon.Information)
+            a.addButton("Start Writing", a.ButtonRole.AcceptRole)
+            a.exec()
+
+            self.settings_manager.onbrd_stps_completed += 1
+            self.begin_onboarding("congrat")
+
+        elif "congrat" == next_step:
+            self.editor.setPlaceholderText("Think...")
+            self.title_entry.blockSignals(False)
+            self.editor.blockSignals(False)
+
+            a = QMessageBox(self)
+            a.setWindowTitle(f"Support {APP_NAME}")
+            a.setText(
+                f"Before you go on, consider supporting the cause of creating more offline-friendly and private software for people with unreliable internet and people who don't like how AI is integrated into everything.")
+            a.setIcon(a.Icon.Information)
+            support = a.addButton(
+                f"Support {APP_NAME}", a.ButtonRole.ActionRole)
+            support.clicked.connect(self.open_license_buy)
+            a.addButton("Skip", a.ButtonRole.NoRole)
+            a.exec()
+
+            self.settings_manager.onbrd_stps_completed += 1
+
+    def get_all_notes_with_contents(self):
+        """for search"""
+        self.notes = self.db.get_all_notes_with_content()
+
+    def encrypt_note_content(self, content):
+        encrypted = self.lock.encrypt_note(content)
+        return encrypted
+
+    def decrypt_note_content(self, encrypted):
+        decrypted = self.lock.decrypt_note(encrypted)
+        return decrypted
+
+    def search(self):
+        """TODO: sort based on search result"""
         try:
-            from scripts.utils import (create_table)
-            create_table()
+            search_term = self.notes_list_search.text()
+
+            if not search_term:
+                self.refresh_notes_list()
+                return
+
+            self.notes_list_widget.clear()
+            final_ranking = []
+            for note in self.notes:
+                note_ = note['title']
+                if ((re.search(search_term, f"{note_}: {self.decrypt_note_content(note['content'])}", re.IGNORECASE) is not None)):
+                    final_ranking.append(note)
+
+            for note in final_ranking:
+                item = QListWidgetItem(note['title'])
+                item.setData(Qt.UserRole, note["id"])  # type: ignore
+                self.notes_list_widget.addItem(item)
         except Exception as e:
-            logging.error(f"Error while creating table: {e}")
+            print(f"error in search: {e}")
 
-        self.current_note = ""
-        self.autosave_after_id = None
+    def restart_app(self):
+        # os.execv(sys.executable, [sys.executable]+sys.argv)
+        print("you should restart")
 
-    # --- Managers and settings ---
-    def init_settings(self):
-        from scripts.settings import (load_settings)
-        settings = load_settings()
-        self.locked = settings.get("request_password", False)
-        if self.locked:
-            while self.locked:
-                result = self.password_manager.ask_password()
-                if result is True:
-                    self.locked = False
-                elif result in ("Cancelled", "exit"):
-                    sys.exit()
-                else:
-                    tkmsg.showerror("Error", "Incorrect password. Try again.")
-        self.focused = ctk.BooleanVar(value=False)
+    def init_ui(self):
+        self.setWindowTitle("Thought Book")
+        self.resize(1200, 600)
 
-    def init_managers(self):
-        from scripts.password_manager import (PasswordManager, SimpleCipher,)
-        from scripts.license_manager import LicenseManager
-        from scripts.auto_updater import AutoUpdater
+        # ===========================
+        # Main Layout
+        # ===========================
 
-        # Security
-        self.cipher = SimpleCipher()
-        self.encrypt = self.cipher.encrypt
-        self.decrypt = self.cipher.decrypt
+        main_layout = QHBoxLayout()
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
 
-        # Settings + Password
-        self.password = None
-        self.password_file = PASS_FILE
-        self.password_manager = PasswordManager(self)
-
-        # License Management
-        self.license_manager = LicenseManager(self)
-
-        # App Update Management
-        self.updater = AutoUpdater(self, False, False)
-        logging.info(f"Current App Version: {APP_VERSION}")
-        # check after startup delay
-        self.after(2000, self.updater.check_update_background)
-
-    # --- UI-based methods ---
-
-    def start_ui(self):
-        """Initialize and layout the UI components"""
-        from scripts.settings import (SettingsWindow)
-        if self.locked:
-            return
-
-        self.wm_title(f"{APP_NAME} {APP_VERSION}")
-        self.wm_iconbitmap(APP_ICON)
-
-        self.notes = self.load_notes()
-        self.current_index = None
-
+        # ===========================
         # Sidebar
-        self.sidebar = ctk.CTkFrame(self, width=200, corner_radius=0)
-        if not self.focused.get():
-            self.sidebar.pack(side="left", fill="y")
+        # ===========================
 
-        button_frame = ctk.CTkFrame(self.sidebar)
-        button_frame.pack(pady=5, fill="x")
+        sidebar = QWidget()
+        sidebar.setFixedWidth(50)
 
-        self.add_button = ctk.CTkButton(
-            button_frame, text="Add Note", fg_color="#555555", width=80,
-            command=self.add_note)
-        self.add_button.pack(side="left", pady=5, padx=2)
+        sidebar_layout = QVBoxLayout(sidebar)
+        sidebar_layout.setContentsMargins(0, 0, 0, 0)
+        sidebar_layout.setSpacing(0)
 
-        self.delete_button = ctk.CTkButton(button_frame, text="Delete Note", fg_color="#555555",
-                                           hover_color="darkred", text_color="white",
-                                           command=self.delete_note, width=80)
-        self.delete_button.pack(side="right", pady=5)
+        notes_list_sidebar = QWidget()
+        notes_list_sidebar.setFixedWidth(250)
 
-        self.scrollable_list = ctk.CTkScrollableFrame(self.sidebar, width=200)
-        self.scrollable_list.pack(fill="both", expand=True)
+        notes_list_sidebar_layout = QVBoxLayout(notes_list_sidebar)
+        notes_list_sidebar_layout.setContentsMargins(0, 0, 0, 0)
+        notes_list_sidebar_layout.setSpacing(0)
 
-        pair = ctk.CTkFrame(self.sidebar)
-        pair.pack(fill="x")
-        settings_btn = ctk.CTkButton(pair, fg_color="#555555",
-                                     text="Settings",
-                                     width=80,
-                                     command=lambda:
-                                     SettingsWindow(self, self.cipher))
-        settings_btn.pack(side="left", pady=5)
+        # ---------------------------
+        # Action List
+        # ---------------------------
 
-        focus_btn = ctk.CTkButton(
-            pair, fg_color="#555555",
-            width=80,
-            text="Focus",
-            command=self.focus_write)
-        focus_btn.pack(side="right")
+        self.action_sidebar = QToolBar(self)
+        self.action_sidebar.setStyleSheet(
+            r"QPushButton{border:none;padding:5px 0px;background:transparent;}"
+            r"QPushButton:hover{background:#333333;}"
+        )
+        self.action_sidebar.setOrientation(QtCore.Qt.Orientation.Vertical)
+        self.action_sidebar.setMinimumWidth(20)
+        # self.action_sidebar.setFixedHeight(110)
 
-        self.note_buttons = []
+        self.new_note_btn = QPushButton("New")
+        self.del_note_btn = QPushButton("Del")
+        self.lock_app_btn = QPushButton("Lock")
+
+        self.new_note_btn.clicked.connect(self.create_new_note)
+        self.del_note_btn.clicked.connect(self.delete_current_note)
+        self.lock_app_btn.clicked.connect(self.lock_app)
+
+        self.action_sidebar.addWidget(self.new_note_btn)
+        self.action_sidebar.addWidget(self.del_note_btn)
+        self.action_sidebar.addWidget(self.lock_app_btn)
+
+        sidebar_layout.addWidget(self.action_sidebar)
+        self.refresh_actions_UI()
+
+        # ---------------------------
+        # Notes List
+        # ---------------------------
+
+        self.notes_list_widget = QListWidget()
+        self.notes_list_widget.itemClicked.connect(
+            self.handle_note_selection
+        )
+
+        self.notes_list_search = QLineEdit()
+        self.notes_list_search.setPlaceholderText("Search")
+        self.notes_list_search.textChanged.connect(
+            self.search
+        )
+
+        notes_list_sidebar_layout.addWidget(self.notes_list_search)
+        notes_list_sidebar_layout.addWidget(self.notes_list_widget)
+
+        sidebar_layout.addStretch()
+
+        # ---------------------------
+        # Settings Button
+        # ---------------------------
+
+        self.premium_button = QPushButton("Buy")
+        # self.premium_button.setStyleSheet("background:#edd;")
+        self.premium_button.clicked.connect(
+            self.open_license_buy
+        )
+        self.premium_button.hide() if self.is_premium_user() else self.premium_button.show()
+
+        self.settings_button = QPushButton("⚙")
+        self.settings_button.clicked.connect(
+            self.open_settings_dialog
+        )
+
+        sidebar_layout.addWidget(self.premium_button)
+        sidebar_layout.addWidget(self.settings_button)
+
+        main_layout.addWidget(sidebar)
+        main_layout.addWidget(notes_list_sidebar)
+
+        # ===========================
+        # Workspace
+        # ===========================
+
+        workspace = QWidget()
+        self.stack = QVBoxLayout(workspace)
 
         # Editor
-        self.right_side = ctk.CTkFrame(self, height=300)
-        self.right_side.pack(side="right", fill="both",
-                             expand=True, padx=10)
 
-        self.editor_frame = ctk.CTkFrame(self.right_side)
-        self.editor_frame.pack(side="top", pady=10, expand=True, fill="both")
+        self.title_entry = QLineEdit()
+        self.title_entry.setPlaceholderText("Title...")
+        self.title_entry.returnPressed.connect(
+            lambda: self.editor.setFocus())
+        self.title_entry.textChanged.connect(
+            self.trigger_autosave
+        )
 
-        self.title_entry = ctk.CTkEntry(
-            self.editor_frame, placeholder_text="Title")
-        self.title_entry.pack(fill="x", pady=5)
+        self.editor = QTextEdit()
+        self.editor.setPlaceholderText("Think...")
+        self.editor.textChanged.connect(
+            self.trigger_autosave
+        )
+        self.editor_font = QFont("sans-serif")
+        self.editor.setFontPointSize(self.main_text_size)
+        self.editor.setFont(self.editor_font)
 
-        self.textbox = ctk.CTkTextbox(
-            self.editor_frame, undo=True, wrap=ctk.WORD)
-        self.textbox.pack(fill="both", expand=True, pady=5)
+        self.stack.addWidget(self.title_entry)
+        self.stack.addWidget(self.editor)
 
-        self.extra_bt_frame = ctk.CTkFrame(self.right_side)
-        self.unfocus_btn = ctk.CTkButton(
-            self.extra_bt_frame, text="Unfocus",
-            width=80, command=self.focus_write,
-            fg_color="#555555")
+        # workspace_layout.addWidget(self.stack)
 
-        self.title_entry.bind(
-            "<KeyRelease>", lambda e: self.schedule_autosave())
-        self.textbox.bind("<KeyRelease>", lambda e: self.schedule_autosave())
-        self.title_entry.bind("<Return>", lambda e: self.textbox.focus_set())
-        self.textbox.bind("<Return>", self.handle_bullets)
+        main_layout.addWidget(workspace)
 
-        self.wm_protocol("WM_DELETE_WINDOW", self.on_close)
+        # ===========================
+        # Central Widget
+        # ===========================
 
-        if not self.notes:
-            self.add_note()
+        container = QWidget()
+        container.setLayout(main_layout)
+
+        self.setCentralWidget(container)
+
+        # ===========================
+        # Menu Bar & Status Bar
+        # ===========================
+        self.statusArea = QStatusBar(self)
+        self.statusArea.setStyleSheet("color:#eee;")
+        self.setStatusBar(self.statusArea)
+
+        self.menuArea = QMenuBar(self)
+        self.menuArea.setStyleSheet("""
+QMenuBar{
+background:#222;
+color:#eee;
+}
+QMenuBar:hover{
+background:#333;
+color:#eee;
+}
+QMenu{
+background:#222;
+color:#eee;
+}
+
+QMenu:hover{
+background:#888;
+color:#eee;
+}""")
+
+        self.setMenuBar(self.menuArea)
+
+        view_menu = self.menuArea.addMenu("View")  # type: ignore
+
+        self.zoom_in_action = QAction("Zoom In", self)
+        self.zoom_in_action.setShortcut("Ctrl+=")
+        self.zoom_in_action.triggered.connect(lambda: self.zoom("in"))
+
+        self.zoom_out_action = QAction("Zoom Out", self)
+        self.zoom_out_action.setShortcut("Ctrl+-")
+        self.zoom_out_action.triggered.connect(lambda: self.zoom("out"))
+
+        view_menu.addAction(self.zoom_in_action)
+        view_menu.addAction(self.zoom_out_action)
+
+        help_menu = self.menuArea.addMenu("Help")  # type: ignore
+
+        self.buy_action = QAction(f"Buy {APP_NAME}", self)
+        self.buy_action.triggered.connect(lambda: self.open_license_buy())
+        self.buy_action.setVisible(not self.is_premium_user())
+
+        help_menu.addAction(self.buy_action)
+
+        self.enablePassword = QPushButton("Enable Password")
+
+        def enpass():
+            self.settings_manager.require_password = True
+            self.inform_user(
+                f"Your {APP_NAME} is now Password Protected. Ensure you remember it though.")
+            self.enablePassword.hide()
+
+        self.enablePassword.clicked.connect(enpass)
+        self.enablePassword.setStyleSheet("color:#ccc;")
+        self.enablePassword.hide()
+
+        self.statusArea.addPermanentWidget(self.enablePassword)
+
+    # =====================================================
+    # Note Management
+    # =====================================================
+
+    def open_license_buy(self):
+        """Manage Licenser"""
+
+        self.license_man._show_license_window()
+
+    def open_donation_box(self):
+        # What is the ruling on asking for donations
+        pass
+
+    def prompt_buy(self, feature_name="this feature"):
+        a = QMessageBox()
+        a.setIcon(a.Icon.Information)
+        a.setWindowTitle(f"Buy {APP_NAME}")
+        a.setText(
+            f"Purchase {APP_NAME} to enjoy {feature_name}")
+        buy_bt = a.addButton("Purchase", a.ButtonRole.AcceptRole)
+        buy_bt.clicked.connect(self.open_license_buy)
+        buy_bt.setStyleSheet("""QPushButton{
+            background:#ddffdd;
+            color:#009900;
+            font-weight:bold;
+            padding:7px 10px;
+            border:none;
+            border-radius:3px;
+        }
+
+        QPushButton:hover{
+            background:#bcffbc;
+        }""")
+        a.addButton("Cancel", a.ButtonRole.RejectRole)
+        a.exec()
+
+    def open_settings_dialog(self):
+        self.settings_dialog = SettingsDialog(
+            self.db, PasswordManager, parent=self)
+        self.settings_dialog.accepted.connect(self.after_settings_exit)
+        self.settings_dialog.rejected.connect(self.after_settings_exit)
+        self.settings_dialog.exec()
+
+    def lock_app(self):
+        self.editor.blockSignals(True)
+        self.title_entry.blockSignals(True)
+        self.notes_list_widget.clear()
+        self.editor.clear()
+        self.title_entry.clear()
+        self.c_content, self.c_title = "", ""
+        self.current_note_id = None
+
+        # make a new instance so that any data saved from the
+        # prev instance disappears
+        self.lock = PasswordManager(
+            db=self.db, settings_manager=self.settings_manager)
+        # self.db = None
+        self.lock.exec()
+        if not self.lock.correct:
+            self.master.exit(0)
+            sys.exit(0)
+            return
         else:
-            self.load_note(0)
-        self.after(400, self.refresh_list)
+            self.unlock_app()
 
-    def schedule_autosave(self):
-        """Schedule an autosave after a short delay to reduce excessive writes."""
-        if self.autosave_after_id:
-            self.after_cancel(self.autosave_after_id)
-        self.autosave_after_id = self.after(500, self.save_current_note)
+    def refresh_actions_UI(self):
+        for act in self.app_actions:
+            if "new" in act.lower():
+                self.new_note_btn.setVisible(True)
 
-    def on_close(self):
-        """Handle app close event, process POAs and destroy window."""
-        try:
-            pass
-            # Pause on BMA integration for now.
-            # poas = self.get_poas(current_content)
-            # self.bma.make_activities(poas)
-        except Exception as e:
-            logging.error(f"Error during app close: {e}")
-        finally:
-            logging.info("App closed successfully.")
-            self.destroy()
+            elif "del" in act.lower():
+                self.del_note_btn.setVisible(True)
 
-    def focus_write(self):
-        # This is also a valuable feature given the UI
-        """Toggle focus mode: hides/shows sidebar and extra buttons."""
-        is_focused = not self.focused.get()
-        self.focused.set(is_focused)
+            elif "lock" in act.lower():
+                if self.settings_manager.require_password:
+                    self.lock_app_btn.setVisible(True)
 
-        if is_focused:
-            self.unfocus_btn.pack_forget()
-            self.extra_bt_frame.pack_forget()
-            self.sidebar.pack(side="left", fill="y")
+                else:
+                    self.lock_app_btn.setVisible(False)
+
+    def unlock_app(self):
+        self.db = DatabaseManager()
+        self.refresh_notes_list()
+        self.refresh_actions_UI()
+        self.editor.blockSignals(False)
+        self.title_entry.blockSignals(False)
+        self.editor.blockSignals(False)
+        self.title_entry.blockSignals(False)
+
+    def after_settings_exit(self):
+        """After we exit settings, this func will refresh the UI by checking all setting and applying those changes"""
+        self.refresh_actions_UI()
+        self.refresh_notes_list()
+
+    def delete_current_note(self):
+        if self.current_note_id is None:
+            return
+
+        self.db.delete_note(self.current_note_id)
+
+        self.refresh_notes_list()
+
+        self.editor.blockSignals(True)
+        self.title_entry.blockSignals(True)
+        self.editor.clear()
+        self.title_entry.clear()
+        self.editor.blockSignals(False)
+        self.title_entry.blockSignals(False)
+
+        self.c_title = ""
+        self.c_content = ""
+        self.current_note_id = None
+
+    def set_autolock_timer_interval(self):
+        """Autolock timer similar to autosave. It will be triggered everytime you make an action within the app. meaning, that any action you do while the app has focus, then this will be triggered and set for the interval minutes you set.
+        """
+        if not self.is_premium_user():
+            return
+
+        interval_mins = self.settings_manager.autolock_minutes
+        if interval_mins:
+            self.autolock_timer.setInterval((interval_mins*60)*1000)
         else:
-            self.extra_bt_frame.pack(fill="x", pady=5, side="bottom")
-            self.unfocus_btn.pack(side="left")
-            self.sidebar.pack_forget()
+            self.autolock_timer.setInterval((5*60)*1000)
+        # TODO: How to use events in pyqt5 to track usage so as to ensure user is using app, if not, then automatically lock after set minutes...
+
+    def trigger_autosave(self):
+        # print("scheduling autosave")
+        self.autosave_timer.setInterval(1000)
+        self.autosave_timer.start()
+
+    def lock_unlimited_notes(self):
+        """Disallow further action through:
+       ```python
+       if lock_feature_until_paid():
+            return
+       ```"""
+
+        checks = (
+            (self.premium_tracker.note_count
+             >= MAX_NOTE_AMOUNT) or (
+                self.get_note_count() > MAX_NOTE_AMOUNT))
+
+        if checks:
+            if not self.is_premium_user():
+                reminded_times = self.premium_tracker.reminders_given
+
+                if not (reminded_times > MAX_REMINDER_ABOUT_UPGRADE):
+                    self.prompt_buy()
+                    self.premium_tracker.reminders_given = reminded_times+1
+                else:
+                    if not self.premium_button.isVisible():
+                        self.premium_button.show()
+                    else:
+                        col = "#ffdcdc"
+                        if self.buy_btn_col_flipper % 2 == 0:
+                            col = "#ffb2b2"
+                        else:
+                            col = "#ffdcdc"
+                        self.premium_button.setStyleSheet(
+                            f"background:{col};")
+                        self.buy_btn_col_flipper += 1
+
+                # TODO: Open license buying page.
+                return True
+            else:
+                # NOTE: this person has paid
+                return False
+
+    def is_premium_user(self):
+        """This will be defined by the presence of the license key. If it has been tampered, then we automatically lock the app again by returning False. until the user resolves their issue, only then, we return True."""
+        return self.license_man.is_premium_user()
+        # return True
+
+    def inform_user(self, info, col="#f6f6f6", for_secs=8):
+        self.statusArea.showMessage(info, for_secs*1000)
+        self.statusArea.setStyleSheet(f"color:{col};")
+
+    def auto_save_note(self):
+        self.c_title = self.title_entry.text()
+        # ensure there's something before saving.
+        self.c_content = self.editor.toPlainText().strip()
+
+        # Encrypt
+        if self.c_content.strip():
+            self.c_content = self.lock.encrypt_note(self.c_content)
+
+        if self.current_note_id is None:
+            self.create_new_note()
+            return
+
+        assert self.db is not None
+        self.db.save_note_content(
+            self.current_note_id,
+            self.c_title,
+            self.c_content)
+
+        self.refresh_notes_list()
+
+        # Remind user subtly about if his notes are not protected.
+        if (not self.settings_manager.require_password) and (self.settings_manager.warn_if_unprotected):
+            self.enablePassword.show()
+
+            if self.times_reminded_about_password_protection < 3:
+                self.inform_user(
+                    f"Your {APP_NAME} is not protected currently. Careful not to write any sensitive stuff. Or enable Password now.", "#FF2424")
+                self.times_reminded_about_password_protection += 1
+            elif (self.times_reminded_about_password_protection > 3) and (self.times_reminded_about_password_protection < 6):
+                self.inform_user(
+                    f"Your {APP_NAME} is not protected currently. Careful not to write any sensitive stuff. Or enable Password now.", "#656565")
+                self.times_reminded_about_password_protection += 1
+            else:
+                # Leave the enable password button there.
+                # when they decide, they can enable it.
+                pass
+
+        self.select_note(self.current_note_id)
+
+        # zoom must be maintained
+        self.editor.setFontPointSize(self.main_text_size)
+
+        # print("autosaved")
+
+    def zoom(self, type_):
+        tmp = ""
+        if "in" in type_:
+            # print(type_)
+            self.main_text_size += 2
+            tmp = self.editor.toPlainText()
+            self.editor.blockSignals(True)
+            self.editor.selectAll()
+            self.editor.setFontPointSize(self.main_text_size)
+            self.editor.insertPlainText(tmp)
+
+        elif "out" in type_:
+            # print(type_)
+            self.main_text_size -= 2
+            tmp = self.editor.toPlainText()
+            self.editor.blockSignals(True)
+            self.editor.selectAll()
+            self.editor.setFontPointSize(self.main_text_size)
+            self.editor.insertPlainText(tmp)
+
+        self.editor.blockSignals(False)
+        self.settings_manager.editor_font_size = self.main_text_size
+
+    def refresh_notes_list(self):
+        """
+        Reload every note from the database into the sidebar.
+        """
+        self.notes_list_widget.clear()
+        # print("sdf")
+
+        assert self.db is not None
+        notes = self.db.get_all_notes()
+
+        # For search...update
+        self.get_all_notes_with_contents()
+
+        # update the premium tracker number
+        self.premium_tracker.note_count = len(notes)
+
+        for note in notes:
+            item = QListWidgetItem(note["title"])
+            item.setData(Qt.UserRole, note["id"])  # type: ignore
+            self.notes_list_widget.addItem(item)
+
+    def create_new_note(self):
+        """
+        Prompt for a title and create a new note.
+        """
+        if self.lock_unlimited_notes():
+            # print("Sorry, please buy me.")
+            return
+
+        title = ""
+        content = ""
+        if self.current_note_id is None:
+            title = self.title_entry.text()
+            content = self.editor.toPlainText()
+
+        self.current_note_id = None
+
+        note_id = self.db.create_note(title, content)
+
+        self.current_note_id = note_id
+
+        self.refresh_notes_list()
+        # self.display_note_content()
+        self.select_note(note_id)
+
+        if (not title.strip()):
+            self.title_entry.setText("Untitled1")
+            if not content.strip():
+                self.editor.clear()
+                self.title_entry.setFocus()
+                self.title_entry.selectAll()
+            return
+
+    def select_note(self, note_id):
+        # Automatically select the new note
+        for row in range(self.notes_list_widget.count()):
+
+            item = self.notes_list_widget.item(row)
+
+            if item.data(Qt.UserRole) == note_id:
+                self.notes_list_widget.setCurrentItem(item)
+                break
+
+    def handle_note_selection(self, item):
+        """
+        User clicked a note in the sidebar.
+        """
+
+        note_id = item.data(Qt.UserRole)
+
+        if note_id is None:
+            return
+
+        self.current_note_id = note_id
+
+        self.display_note_content()
+
+    def display_note_content(self):
+        """
+        Load the selected note into the editor.
+        """
+
+        if self.current_note_id is None:
+            return
+
+        assert self.db is not None
+        info = self.db.get_note_content(
+            self.current_note_id
+        )
+
+        title = ""
+        content = ""
+
+        title = info[0]
+        content = info[1]
+
+        if content.strip():
+            try:
+                content = self.decrypt_note_content(content)
+            except Exception as e:
+                print(e)
+                self.editor.setPlaceholderText(
+                    "Sorry, this note is not decryptable, it is lost forever.")
+
+        # Prevent autosave from firing while loading
+
+        self.editor.blockSignals(True)
+        self.title_entry.blockSignals(True)
+        self.title_entry.setText(title)
+        self.editor.setPlainText(content)
+        self.title_entry.blockSignals(False)
+        self.editor.blockSignals(False)
+
+        # Always return to edit mode when opening a note
+        self.is_read_mode = False
 
     def get_note_count(self):
-        """Return current number of notes"""
-        return len(self.load_notes())
+        try:
+            assert self.db is not None
+            return len(self.db.get_all_notes())
+        except Exception as e:
+            return 0
 
-    # --------------------------
-
-    # --- Note-based methods ---
-
-    def load_notes(self) -> list:
-        """Load all notes from the database."""
-        from scripts.utils import (get_notes)
-        return get_notes()
-
-    def add_note(self):
-        """Create a new note, save current, and enforce freemium limits."""
-        MAX_FREEMIUM_NOTES = 5
-        #
-
-        # --- Mandatory Security Check ---
-        if not self.license_manager.is_premium_user()\
-                and self.get_note_count() >= MAX_FREEMIUM_NOTES:
-            if tkmsg.askyesno(
-                f"{APP_NAME} - Trial Version",
-                f"This is a trial version of {APP_NAME}"
-                " designed so you can try it out before"
-                " deciding to buy."
-                " Would you like to proceed"
-                    " to buy the full version now?"):
-                self.license_manager._show_license_window(self)
-            return
-        # --------------------------------
-
-        if self.current_index is not None:
-            self.save_current_note(index_to_save=self.current_index)
-
-        self.current_index = None
-        self.title_entry.delete(0, "end")
-        self.textbox.delete("1.0", "end")
-        self.title_entry.insert(0, "New Note")
-        self.title_entry.focus_set()
-
-        self.save_current_note()
-
-        self.title_entry.select_range(0, "end")
-        self.title_entry.focus()
-
-    def save_current_note(self, index_to_save=None):
-        from scripts.utils import (save_note)
-        """Save the current note or a specified note index to the database."""
-        idx, content = self.get_current_note(index_to_save)
-        content_encrypted = self.encrypt(content)
-        title = self.title_entry.get()
-
-        if idx is not None:
-            note_id = self.notes[idx].get("id")
-            if note_id:
-                save_note(title, content_encrypted, note_id)
-                self.notes[idx] = {"id": note_id,
-                                   "title": title, "content": content_encrypted}
-            else:
-                new_id = save_note(title, content_encrypted)
-                self.notes[idx] = {"id": new_id,
-                                   "title": title, "content": content_encrypted}
-        else:
-            new_id = save_note(title, content_encrypted)
-            self.notes.append({"id": new_id, "title": title,
-                              "content": content_encrypted})
-            self.current_index = len(self.notes) - 1
-
-        self.refresh_list()
-
-    def get_current_note(self, index_to_save=None):
-        """Return the current note index and content (unencrypted)."""
-        idx = index_to_save if index_to_save is not None else self.current_index
-        content = self.textbox.get("1.0", "end-1c").strip()
-        return idx, content
-
-    def refresh_list(self):
-        """Refresh the sidebar list of notes and update buttons."""
-        for btn in self.note_buttons:
-            btn.destroy()
-        self.note_buttons.clear()
-
-        for idx, note in enumerate(self.notes):
-            display_title = self._truncate_text(
-                note.get("title", "Untitled"), 20)
-            btn = ctk.CTkButton(
-                self.scrollable_list, fg_color="#333333", text=display_title, width=180,
-                command=lambda i=idx: self.load_note(i))
-            btn.pack(pady=2)
-            self.note_buttons.append(btn)
-
-    def load_note(self, index):
-        """Load note by index, saving current note first."""
-        if self.current_index is not None:
-            self.save_current_note(index_to_save=self.current_index)
-
-        self.current_index = index
-        note = self.notes[index]
-
-        self.title_entry.delete(0, "end")
-        self.title_entry.insert(0, note.get("title", ""))
-        self.textbox.delete("1.0", "end")
-        self.textbox.insert("1.0", self.decrypt(note.get("content", "")))
-
-        for i, btn in enumerate(self.note_buttons):
-            btn.configure(fg_color="#555555" if i == index else "#333333")
-
-    def delete_note(self):
-        """Delete the current note after confirmation."""
-        from scripts.utils import (delete_note)
-        if self.current_index is None:
-            return
-
-        if tkmsg.askyesno("Confirm Delete",
-                          "Are you sure you want to delete this note?"):
-            note_id = self.notes[self.current_index].get("id")
-            if note_id:
-                delete_note(note_id)
-                del self.notes[self.current_index]
-
-            self.title_entry.delete(0, "end")
-            self.textbox.delete("1.0", "end")
-            self.current_index = None
-
-            self.refresh_list()
-
-    # --------------------
-
-    # --- Text-based methods ---
-
-    def _truncate_text(self, text, max_length=20):
-        """Truncate a string to fit within max_length (chr) for display in buttons."""
-        return text if len(text) <= max_length else text[:max_length - 3] + "..."
-
-    def handle_bullets(self, event=None):
-        """Handle multiline bullet input when Enter key is pressed."""
-        index = self.textbox.index("insert linestart")
-        line_text = self.textbox.get(index, f"{index} lineend")
-        if line_text.strip().startswith("-"):
-            if line_text.strip() == "-":
-                # Empty bullet line, exit bullet mode
-                self.textbox.delete(index, f"{index} lineend")
-                self.textbox.insert("insert", "\n")
-                return "break"
-            else:
-                self.textbox.insert("insert", "\n- ")
-                return "break"
-
-        return None
-
-    # --------------------
+    def abouttoquit(self):
+        """What to do when user is leaving"""
+        print("bye")
 
 
 def main():
-    from scripts.utils import (center_window)
-    ctk.set_appearance_mode("dark")
-    app = NotesApp()
-    center_window(app, 900, 500)
-    app.mainloop()
+    app = QApplication(sys.argv)
+    app.setWindowIcon(QIcon(str(APP_PHOTO)))
+    window = NoteApp(app)
+    window.setWindowIcon(QIcon(str(APP_PHOTO)))
+    app.aboutToQuit.connect(window.abouttoquit)
+    sys.exit(app.exec_())
 
-# if __name__ == "__main__":
-#     main()
+
+if __name__ == "__main__":
+    main()
