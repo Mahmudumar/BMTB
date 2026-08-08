@@ -1,6 +1,5 @@
 import json
 import re
-import threading
 import webbrowser
 from PyQt5.QtWidgets import QDialog, QInputDialog, QLabel, QLineEdit, QMessageBox, QPushButton, QVBoxLayout
 from PyQt5.QtGui import QIcon

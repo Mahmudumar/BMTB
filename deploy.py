@@ -139,26 +139,33 @@ SectionEnd
 
 ;--------------------------------
 Section "Uninstall"
-    
-    ; Delete shortcuts
+
+    ; Delete Start Menu shortcut
     Delete "$SMPROGRAMS\{APP_NAME}\{APP_NAME}.lnk"
     RMDir "$SMPROGRAMS\{APP_NAME}"
+
+    ; Delete Desktop shortcut
     Delete "$DESKTOP\{APP_NAME}.lnk"
 
-    ; Delete uninstaller
+    ; Remove uninstaller
     Delete "$INSTDIR\Uninstall_{APP_SHORT_NAME}.exe"
 
     ; Remove from Add/Remove Programs
     DeleteRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\{APP_NAME}"
 
-    ; Remove environment variable
+    ; Remove app environment variable
     DeleteRegValue HKCU "Environment" "{APP_SHORT_NAME}"
+
+    ; Refresh environment variables
     System::Call 'user32::SendMessageTimeout(i ${{HWND_BROADCAST}}, i ${{WM_SETTINGCHANGE}}, i 0, t "Environment", i 0, i 1000, *i .r0)'
 
-    ; Remove install directory
-    RMDir /r "$INSTDIR"
-SectionEnd
+    ; Remove BMTB registry branch only
+    DeleteRegKey HKCU "Software\BM\BMTB"
 
+    ; Remove installed application files
+    RMDir /r "$INSTDIR"
+
+SectionEnd
 
 """
 # Build executable

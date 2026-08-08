@@ -22,7 +22,9 @@ class AutoUpdater:
         self.parent = parent
         self.auto_install = auto_install
         self.show_uptodate = show_if_up_to_date
-        os.makedirs(UPDATE_DOWNLOAD_FOLDER, exist_ok=True)
+
+        if not UPDATE_DOWNLOAD_FOLDER.exists():
+            os.makedirs(UPDATE_DOWNLOAD_FOLDER, exist_ok=True)
 
     def check_update_background(self):
         """Run version check in background thread
@@ -35,7 +37,7 @@ class AutoUpdater:
 
     def _check(self):
         try:
-            resp = requests.get(UPDATE_INFO_URL, timeout=5)
+            resp = requests.get(UPDATE_INFO_URL)
             resp.raise_for_status()
             data = resp.json()
             latest_version = data['latest_version']
@@ -51,20 +53,19 @@ class AutoUpdater:
                     self.prompt_update(latest_version, notes, url)
             else:
                 logging.info("Software up to date")
-                if not self.auto_install and self.show_uptodate:
-                    QMessageBox.information(None,
-                        "Up to Date", f"Your {APP_NAME} is up to date")
-
+                QMessageBox.information(None,
+                                        "Up to Date", f"Your {APP_NAME} is up to date")
         except Exception as e:
             logging.error(f"Update check failed: {e}")
 
     def prompt_update(self, latest_version, notes, url):
         """Ask user for update, non-blocking."""
+
         msg = (f"{APP_NAME} v{latest_version} is "
                "available.\nDo you want to update now?")
-        
-        if QMessageBox.information(None,f"{APP_SHORT_NAME} Update", msg):
-            self.download_and_install(url)
+
+        QMessageBox.information(None, f"{APP_NAME} Update", msg)
+        self.download_and_install(url)
 
     def download_and_install(self, url):
         """Download installer with optional progress hook."""

@@ -28,18 +28,6 @@ lQIDAQAB
 
 """
 
-NOTE_CRYPTOGRAPHIC_PUBLIC_KEY = """-----BEGIN PUBLIC KEY-----
-MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA21jrh5SHrXJ77575825l
-HyPpNrlCr9CGXJafMawjhz1w2OhvWHIWeKy1z/lyxTIsSa+Lk6+Dcnvxumxuz+1j
-xh1aOqcoiZL0DYfiFrK8Qs5GOi85Bum+FA5aE0RGQu0VmPic2Z6n9IZGjW7PuVvZ
-XSJ/e5bDoOWH8+YyzN+NwA9jKce4hvSkdMEoGvCcp4QbIVKqUdn9a3xWUSCZxNDW
-E0mJkjTp6MeKgSWSBGdWBB9OXTu33qMsJUkYoTIfYezns3uJ0qW/x+63V4z6mspz
-8x/mukmmIMyQPYP/sqKMPRcftYVdJRD2tvkhHeBmgTTC6FjPNqlcE8gOoG8sqmb9
-6wIDAQAB
------END PUBLIC KEY-----"""
-
-NOTE_CRYPTOGRAPHIC_KEY = """yESHqIu4aRrvpj1vPyaKp8cYLbZcmoLUQ46gMtjAq8o="""
-
 
 # --- App Info ---
 APP_NAME = "Thought Book"
@@ -192,14 +180,14 @@ To activate, please paste your License Key below.
 
 If you don’t have a license yet, click below to purchase one.
 """
-MAX_NOTE_AMOUNT = 5
+MAX_NOTE_AMOUNT = 15
 PREMIUM_FEATURES = ["unlimited_notes", "autolock"]
 MAX_REMINDER_ABOUT_UPGRADE = 3
 
 
 # AutoUpdater
-UPDATE_DOWNLOAD_FOLDER = os.path.join(
-    os.path.expanduser("~"), f"{APP_SHORT_NAME}_updates")
+UPDATE_DOWNLOAD_FOLDER = Path(os.path.join(
+    os.path.expanduser("~"), f"{APP_SHORT_NAME}_updates"))
 
 
 # --- External Links ---
@@ -213,9 +201,9 @@ TNR_BMTB_SERVER = "https://feedback-server-tnr.onrender.com"
 
 
 if __name__ == "__main__":
-    # print(f"Main folder: {MAIN_FOLDER}")
-    # print(f"Data folder: {DATA_FOLDER}")
-    # print(f"Device ID: {get_device_id(ID_FILE)}")
-    # print(f"App version: {APP_VERSION}")
-    # print(f"App ICON: {APP_ICON}")
+    print(f"Main folder: {MAIN_FOLDER}")
+    print(f"Data folder: {DATA_FOLDER}")
+    print(f"Device ID: {get_device_id(ID_FILE)}")
+    print(f"App version: {APP_VERSION}")
+    print(f"App ICON: {APP_ICON}")
     pass

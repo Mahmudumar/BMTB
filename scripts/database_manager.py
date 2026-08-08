@@ -5,14 +5,13 @@ import sqlite3
 from scripts.constants import NOTES_DB
 
 
-
 class DatabaseManager:
     def __init__(self, db_name=f"{NOTES_DB}"):
         self.conn = sqlite3.connect(db_name)
         self.conn.row_factory = sqlite3.Row
         self.cursor = self.conn.cursor()
         # first check if the file is there
-    
+
         self.create_tables()
 
     def create_tables(self):
@@ -69,7 +68,7 @@ class DatabaseManager:
         """)
 
         return self.cursor.fetchall()
-    
+
     def get_all_notes(self):
         self.cursor.execute("""
             SELECT id, title

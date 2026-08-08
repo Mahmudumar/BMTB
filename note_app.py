@@ -79,8 +79,8 @@ class NoteApp(QMainWindow):
         self.premium_tracker = PremiumTracker(self)
 
         self.current_note_id = None
-        self.c_title = ""
-        self.c_content = ""
+        c_title = ""
+        c_content = ""
         self.is_read_mode = False
         self.notes = []
 
@@ -169,8 +169,9 @@ QListWidget{
         # NOTE: If there's no notes.db we don't have anything to protect. So we can ask for a new password and save it in that NEW db. Encrypt the DB too.
 
         fresh_install = [
-            (not self.db.get_config("master_password").strip()),
-            (len(self.db.get_all_notes()) < 1)
+            ((not self.db.get_config("encDEK").strip()) and (
+                not self.db.get_config("salt").strip())),
+            (len(self.db.get_all_notes()) <= 0)
         ]
 
         if all(fresh_install):
@@ -217,20 +218,23 @@ QListWidget{
 
         if self.settings_manager.onbrd_stps_completed > len(self.onboarding_steps):
             self.settings_manager.is_first_run = False
+
         print(next_step)
         if "set_password" == next_step:
             # NOTE: Must add 'and' logic
             # XXX: Hackable area:
 
             if (self.settings_manager.is_first_run):
+                self.settings_manager.require_password = True
                 self.lock = PasswordManager(
                     db=self.db, settings_manager=self.settings_manager, new=True)
                 self.lock.set_message(f"""\
 Welcome to {APP_NAME}
 
 Please set an easy but hard to guess password.
-
 And a hint to help you remember.
+
+Your Password will be used to encrypt all your notes.
 """, "#19d819")
 
             self.lock.exec()
@@ -246,7 +250,7 @@ And a hint to help you remember.
             a = QMessageBox(self)
             a.setWindowTitle("I must remember my Password")
             a.setText(
-                "Ensure you remember your password and hint, once you forget it, the only way to reset it is to delete all your notes.")
+                "Ensure you remember your password and hint, once you forget them, the only way to reset it is to delete all your notes.")
             a.setIcon(a.Icon.Warning)
             go_back = a.addButton("Go back", a.ButtonRole.NoRole)
             go_back.clicked.connect(
@@ -275,9 +279,10 @@ And a hint to help you remember.
             self.title_entry.setText("First Note to Self")
             self.editor.setPlaceholderText(
                 "Don't fear the blank page... Start with 'Hello' or something controversial. LOL.")
+            self.editor.setFocus()
 
             timer = QTimer(self)
-            timer.setInterval(5_000)
+            timer.setInterval(3_000)
             tracker = OnBoardingTracker(timer, parent=self)
             self.master.installEventFilter(tracker)
 
@@ -297,7 +302,8 @@ When you want to write sensitive notes, don't use notepad.
 Instead, lock all your notes in {APP_NAME}.""")
 
                 a.setIcon(a.Icon.Information)
-                lock = a.addButton("Secure Notes", a.ButtonRole.AcceptRole)
+                lock = a.addButton("Secure Your Notes",
+                                   a.ButtonRole.AcceptRole)
                 a.exec()
 
                 timer.stop()
@@ -321,12 +327,12 @@ Instead, lock all your notes in {APP_NAME}.""")
                 self.notes_list_widget.clear()
                 self.editor.clear()
                 self.title_entry.clear()
-                self.c_content, self.c_title = "", ""
+
                 self.current_note_id = None
                 lock = PasswordManager(
                     self.db, self.settings_manager, parent=self)
                 lock.set_message(
-                    f"Enter your password to unlock your {APP_NAME}.", "#14b324")
+                    f"Now enter your set password to unlock your {APP_NAME}.", "#14b324")
                 lock.exec()
                 if not lock.correct:
                     sys.exit(0)
@@ -337,6 +343,8 @@ Instead, lock all your notes in {APP_NAME}.""")
             self.lock_app_btn.clicked.connect(lambda: onboard_lock())
 
         elif "unlock" == next_step:
+            self.title_entry.blockSignals(False)
+            self.editor.blockSignals(False)
             self.lock_app_btn.clicked.disconnect()
             self.lock_app_btn.setStyleSheet("")
             self.lock_app_btn.clicked.connect(self.lock_app)
@@ -354,9 +362,9 @@ Instead, lock all your notes in {APP_NAME}.""")
             self.begin_onboarding("congrat")
 
         elif "congrat" == next_step:
-            self.editor.setPlaceholderText("Think...")
             self.title_entry.blockSignals(False)
             self.editor.blockSignals(False)
+            self.editor.setPlaceholderText("Think...")
 
             a = QMessageBox(self)
             a.setWindowTitle(f"Support {APP_NAME}")
@@ -364,7 +372,7 @@ Instead, lock all your notes in {APP_NAME}.""")
                 f"Before you go on, consider supporting the cause of creating more offline-friendly and private software for people with unreliable internet and people who don't like how AI is integrated into everything.")
             a.setIcon(a.Icon.Information)
             support = a.addButton(
-                f"Support {APP_NAME}", a.ButtonRole.ActionRole)
+                f"Support {APP_NAME}", a.ButtonRole.YesRole)
             support.clicked.connect(self.open_license_buy)
             a.addButton("Skip", a.ButtonRole.NoRole)
             a.exec()
@@ -374,14 +382,6 @@ Instead, lock all your notes in {APP_NAME}.""")
     def get_all_notes_with_contents(self):
         """for search"""
         self.notes = self.db.get_all_notes_with_content()
-
-    def encrypt_note_content(self, content):
-        encrypted = self.lock.encrypt_note(content)
-        return encrypted
-
-    def decrypt_note_content(self, encrypted):
-        decrypted = self.lock.decrypt_note(encrypted)
-        return decrypted
 
     def search(self):
         """TODO: sort based on search result"""
@@ -565,7 +565,7 @@ QMenuBar{
 background:#222;
 color:#eee;
 }
-QMenuBar:hover{
+QMenuBar::item:selected{
 background:#333;
 color:#eee;
 }
@@ -574,7 +574,7 @@ background:#222;
 color:#eee;
 }
 
-QMenu:hover{
+QMenu::item:selected{
 background:#888;
 color:#eee;
 }""")
@@ -665,8 +665,8 @@ color:#eee;
         self.notes_list_widget.clear()
         self.editor.clear()
         self.title_entry.clear()
-        self.c_content, self.c_title = "", ""
         self.current_note_id = None
+        self.lock.lock_DEK()
 
         # make a new instance so that any data saved from the
         # prev instance disappears
@@ -725,8 +725,6 @@ color:#eee;
         self.editor.blockSignals(False)
         self.title_entry.blockSignals(False)
 
-        self.c_title = ""
-        self.c_content = ""
         self.current_note_id = None
 
     def set_autolock_timer_interval(self):
@@ -795,23 +793,27 @@ color:#eee;
         self.statusArea.setStyleSheet(f"color:{col};")
 
     def auto_save_note(self):
-        self.c_title = self.title_entry.text()
-        # ensure there's something before saving.
-        self.c_content = self.editor.toPlainText().strip()
+        c_title = self.title_entry.text()
+        c_content = self.editor.toPlainText().strip()
 
-        # Encrypt
-        if self.c_content.strip():
-            self.c_content = self.lock.encrypt_note(self.c_content)
+        self.editor.setFontPointSize(self.main_text_size)
+        # ensure there's something before saving.
+        if c_content:
+            c_content = self.lock.encrypt_note(
+                self.lock.crypto.dek, c_content)
+
+            if not c_title:
+                self.title_entry.setText("Untitled")
+
+            assert self.db is not None
+            self.db.save_note_content(
+                self.current_note_id,
+                c_title,
+                c_content.decode())
 
         if self.current_note_id is None:
             self.create_new_note()
             return
-
-        assert self.db is not None
-        self.db.save_note_content(
-            self.current_note_id,
-            self.c_title,
-            self.c_content)
 
         self.refresh_notes_list()
 
@@ -908,7 +910,7 @@ color:#eee;
         self.select_note(note_id)
 
         if (not title.strip()):
-            self.title_entry.setText("Untitled1")
+            self.title_entry.setText("Untitled")
             if not content.strip():
                 self.editor.clear()
                 self.title_entry.setFocus()
@@ -952,26 +954,30 @@ color:#eee;
             self.current_note_id
         )
 
-        title = ""
-        content = ""
+        self.title = ""
+        c_content = ""
 
-        title = info[0]
-        content = info[1]
+        self.title = info[0]
+        c_content = info[1]
 
-        if content.strip():
-            try:
-                content = self.decrypt_note_content(content)
-            except Exception as e:
-                print(e)
+        try:
+            if c_content.strip():
+                c_content = self.lock.decrypt_note(
+                    self.lock.crypto.dek, c_content)
+            else:
                 self.editor.setPlaceholderText(
-                    "Sorry, this note is not decryptable, it is lost forever.")
+                    "Write like an independent thinker...")
+        except Exception as e:
+            print(e)
+            self.editor.setPlaceholderText(
+                "Sorry, this note is not decryptable, it is lost forever.")
 
         # Prevent autosave from firing while loading
 
         self.editor.blockSignals(True)
         self.title_entry.blockSignals(True)
-        self.title_entry.setText(title)
-        self.editor.setPlainText(content)
+        self.title_entry.setText(self.title)
+        self.editor.setPlainText(c_content)
         self.title_entry.blockSignals(False)
         self.editor.blockSignals(False)
 

@@ -249,9 +249,8 @@ class SettingsDialog(QDialog):
                 "The passwords do not match."
             )
             return
-        # print(new_password)
-        self.password_manager.save_hashed(
-            self.password_manager.cipher.pass_hash(new_password))
+        
+        print(new_password)
 
         QMessageBox.information(
             self,
