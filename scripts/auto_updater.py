@@ -8,20 +8,17 @@ import threading
 from pathlib import Path
 from packaging import version
 
-
-from PyQt5.QtWidgets import QMessageBox
-
 from .constants import (logging, APP_VERSION,
                         APP_NAME, APP_SHORT_NAME,
                         UPDATE_DOWNLOAD_FOLDER,
-                        UPDATE_INFO_URL)
+                        TNR_BMTB_SERVER)
 
 
 class AutoUpdater:
-    def __init__(self, parent, auto_install=True, show_if_up_to_date=False):
+    def __init__(self, parent):
         self.parent = parent
-        self.auto_install = auto_install
-        self.show_uptodate = show_if_up_to_date
+        self.update_available = False
+        self.prompt_msg = ""
 
         if not UPDATE_DOWNLOAD_FOLDER.exists():
             os.makedirs(UPDATE_DOWNLOAD_FOLDER, exist_ok=True)
@@ -29,43 +26,46 @@ class AutoUpdater:
     def check_update_background(self):
         """Run version check in background thread
           SILENTLY by default."""
+        # self._check()
         threading.Thread(target=self._check, daemon=True).start()
-
-    def check_update_and_prompt(self):
-        self.auto_install = False  # prompt before starting update
-        self.check_update_background()
 
     def _check(self):
         try:
-            resp = requests.get(UPDATE_INFO_URL)
-            resp.raise_for_status()
-            data = resp.json()
-            latest_version = data['latest_version']
-            url = data['url']
-            notes = data.get('notes', "")
+            app_info = {
+                "app_name": APP_NAME,
+                "app_version": APP_VERSION
+            }
+
+            post_my_info = requests.post(
+                f"{TNR_BMTB_SERVER}/check_updates", json=app_info)
+            # print(post_my_info)
+
+            data = dict(post_my_info.json())
+            post_my_info.raise_for_status()
+            latest_version = data.get('latest_version', '')
+            url = data.get('url', '')
+            notes = data.get('notes', '')
+            # print(data)
             logging.info(f"Latest Version found: {latest_version}")
 
-            if (version.parse(latest_version) > version.parse(APP_VERSION)):
-                logging.info(f"Latest Version found: {latest_version}")
-                if self.auto_install:
-                    self.download_and_install(url)
-                else:
-                    self.prompt_update(latest_version, notes, url)
+            # XXX: remove 'not', only meant for testing
+            if not (version.parse(latest_version) > version.parse(APP_VERSION)):
+                print(f"Latest Version found: {latest_version}")
+                # self.prompt_update(latest_version, notes, url)
+                # self.download_and_install(url)
+                self.update_available = True
+                return True
             else:
                 logging.info("Software up to date")
-                QMessageBox.information(None,
-                                        "Up to Date", f"Your {APP_NAME} is up to date")
+                print("uptodate")
+                self.update_available = False
+                return False
+
         except Exception as e:
+            print(f"check failed: {e}")
             logging.error(f"Update check failed: {e}")
-
-    def prompt_update(self, latest_version, notes, url):
-        """Ask user for update, non-blocking."""
-
-        msg = (f"{APP_NAME} v{latest_version} is "
-               "available.\nDo you want to update now?")
-
-        QMessageBox.information(None, f"{APP_NAME} Update", msg)
-        self.download_and_install(url)
+            self.update_available = None
+            return None
 
     def download_and_install(self, url):
         """Download installer with optional progress hook."""
@@ -81,6 +81,7 @@ class AutoUpdater:
                     if chunk:
                         f.write(chunk)
                         downloaded += len(chunk)
+
             # Run installer
             subprocess.Popen([filename, "/S"], shell=True)
 
@@ -125,3 +126,82 @@ class AutoUpdater:
                             logging.error(f"Failed to delete {file.name}: {e}")
         else:
             logging.info("New version not detected. No files deleted.")
+
+
+
+import sys
+import time
+from concurrent.futures import ThreadPoolExecutor
+from PyQt5.QtCore import QMetaObject, Qt, pyqtSlot
+from PyQt5.QtWidgets import QApplication, QLabel, QProgressBar, QPushButton, QVBoxLayout, QWidget
+
+
+class InstallerApp(QWidget):
+
+    def __init__(self):
+        super().__init__()
+        # 1. Thread pool manager
+        self.executor = ThreadPoolExecutor(max_workers=1)
+        self.init_ui()
+
+    def init_ui(self):
+        self.setWindowTitle("App Installer")
+        self.resize(350, 150)
+
+        # 2. UI Widgets
+        self.status_label = QLabel("Ready to install.", self)
+        
+        self.progress_bar = QProgressBar(self)
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(0)
+
+        self.start_button = QPushButton("Install Now", self)
+        self.start_button.clicked.connect(self.start_installation)
+
+        # Layout setup
+        layout = QVBoxLayout()
+        layout.addWidget(self.status_label)
+        layout.addWidget(self.progress_bar)
+        layout.addWidget(self.start_button)
+        self.setLayout(layout)
+
+    # 3. The background installation target (Run in another thread)
+    def run_installer_process(self):
+        steps = ["Extracting files...", "Copying assets...", "Creating shortcuts...", "Cleaning up..."]
+        
+        for i, step in enumerate(steps):
+            # Update the UI text safely via Thread-Safe Method Invocation
+            QMetaObject.invokeMethod(self.status_label, "setText", Qt.QueuedConnection, Q_ARG(str, step))
+            
+            # Simulate a chunk of download/install work
+            time.sleep(1) 
+            
+            # Calculate and update progress percentage
+            progress = int(((i + 1) / len(steps)) * 100)
+            QMetaObject.invokeMethod(self.progress_bar, "setValue", Qt.QueuedConnection, Q_ARG(int, progress))
+
+        return "Installation Completed Successfully!"
+
+    def start_installation(self):
+        self.start_button.setEnabled(False)
+        self.progress_bar.setValue(0)
+        
+        # 4. Push the installer task to the background thread
+        future = self.executor.submit(self.run_installer_process)
+        
+        # 5. Catch the final return value when finished
+        future.add_done_callback(self.on_installation_finished)
+
+    # 6. Callback executed when the installer finishes
+    def on_installation_finished(self, future):
+        try:
+            # Catch the return string from our background function
+            final_result = future.result()
+            
+            # Safely push final updates to the GUI thread
+            QMetaObject.invokeMethod(self.status_label, "setText", Qt.QueuedConnection, Q_ARG(str, final_result))
+        except Exception as e:
+            QMetaObject.invokeMethod(self.status_label, "setText", Qt.QueuedConnection, Q_ARG(str, f"Error: {str(e)}"))
+        finally:
+            # Re-enable the button via UI thread safety
+            QMetaObject.invokeMethod(self.start_button, "setEnabled", Qt.QueuedConnection, Q_ARG(bool, True))

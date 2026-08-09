@@ -446,7 +446,6 @@ class PasswordManager(QDialog):
 
     def okay_new_change(self):
         def save_changed(old, new):
-
             # NOTE: unlock DEK first
             stored_DEK = self.db.get_config("encDEK").encode()
             stored_salt = base64.urlsafe_b64decode(
@@ -498,6 +497,11 @@ class PasswordManager(QDialog):
             )
         except Exception as e:
             print(e)
+            QMessageBox.information(
+                self,
+                "Error",
+                "Sorry, something went terribly wrong."
+            )
 
     def okay_new(self):
         """This is only called on the first install. Or on a new .db file"""

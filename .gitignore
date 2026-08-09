@@ -29,3 +29,5 @@ ac.py
 logs/
 __pycache__/
 venv/
+
+!?*_logic.md

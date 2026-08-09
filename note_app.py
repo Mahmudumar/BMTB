@@ -4,6 +4,7 @@ import threading
 
 from PyQt5 import QtCore
 from PyQt5.QtCore import QObject, QEvent, QTimer
+from scripts.auto_updater import AutoUpdater
 from scripts.database_manager import DatabaseManager
 from scripts.license_manager import LicenseManager
 import sys
@@ -77,6 +78,8 @@ class NoteApp(QMainWindow):
         self.db = DatabaseManager()
         self.settings_manager = Settings(self.db)
         self.premium_tracker = PremiumTracker(self)
+        self.autoupdate_checker = AutoUpdater(self)
+        self.update_is_available = False
 
         self.current_note_id = None
         c_title = ""
@@ -186,6 +189,12 @@ QListWidget{
             "unlock",
             "congrats"
         ]
+        # We want to check if there are any updates, then we prompt
+        if ((self.settings_manager.update_reminders_given < 3)):
+            self.background_update_check()
+            self.settings_manager.update_reminders_given += 1
+        else:
+            self.update_btn.show()
 
         if self.settings_manager.onbrd_stps_completed >= len(self.onboarding_steps):
             self.settings_manager.is_first_run = False
@@ -600,7 +609,18 @@ color:#eee;
         self.buy_action.triggered.connect(lambda: self.open_license_buy())
         self.buy_action.setVisible(not self.is_premium_user())
 
+        self.update_check_action = QAction(f"Check for Updates", self)
+        self.update_check_action.triggered.connect(
+            lambda: self.obvi_update_check())
+
+        self.update_btn = QPushButton("Update Now")
+        self.update_btn.clicked.connect(self.update_now)
+        self.update_btn.hide()
+
+        self.statusArea.addPermanentWidget(self.update_btn)
+
         help_menu.addAction(self.buy_action)
+        help_menu.addAction(self.update_check_action)
 
         self.enablePassword = QPushButton("Enable Password")
 
@@ -619,6 +639,58 @@ color:#eee;
     # =====================================================
     # Note Management
     # =====================================================
+    def background_update_check(self):
+        threading.Thread(target=self._check_for_updates,
+                         args=(True,), daemon=True).start()
+
+    def update_now(self):
+        print("Updating...")
+        pass
+
+    def obvi_update_check(self):
+        """Give notification for the availability"""
+        threading.Thread(target=self._check_for_updates,
+                         args=(False,), daemon=True).start()
+
+    def get_update_availability_status(self, status):
+        if status:
+            self.inform_user(
+                f"Your {APP_NAME} needs an update to stay secure.")
+            self.update_btn.show()
+        elif not status:
+            self.update_btn.hide()
+        else:
+            print("some error")
+            pass
+
+        # silently fail.
+
+        return status
+
+    def _check_for_updates(self, silent=False):
+        update_is_available = self.autoupdate_checker._check()
+        if silent:
+            self.update_is_available = self.get_update_availability_status(
+                update_is_available)
+
+        if not silent:
+            if update_is_available:
+                a = QMessageBox()
+                a.setIcon(a.Icon.Information)
+                a.setWindowTitle(f"{APP_NAME} update is available")
+                a.setText(
+                    f"{APP_NAME} needs an update. Do you want to install updates now?")
+                update = a.addButton("Yes", a.ButtonRole.AcceptRole)
+                # Do the actual download. same as the subtle statusArea button
+                update.clicked.connect()
+                a.addButton("No", a.ButtonRole.RejectRole)
+                a.exec()
+            elif update_is_available is False:
+                a = QMessageBox.information(None, f"{APP_NAME} is Up to Date",
+                                            f"{APP_NAME} is Up to date.")
+            else:
+                QMessageBox.critical(
+                    None, "Something happened", f"Update checking encountered a problem, might be from our server or a connection problem. Try checking for updates later.")
 
     def open_license_buy(self):
         """Manage Licenser"""

@@ -86,7 +86,6 @@ LICENSE_MESSAGE_FILE = HIDDEN_FOLDER / "license_msg.json"
 
 # For updates system
 DEPLOY_INFO_PATH = HIDDEN_FOLDER / "deploy.info"
-UPDATE_INFO_URL = "https://tech-naija-rise.github.io/BMTB/update.json"
 
 
 NOTES_DB = NOTES_FOLDER / "BMTbnotes.db"

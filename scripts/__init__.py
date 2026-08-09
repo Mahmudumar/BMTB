@@ -17,6 +17,7 @@ class Settings(QSettings):
     EDITOR_FONT_SIZE = "editor/font_size"
 
     IS_FIRST_RUN = "system/is_first_run"
+    UPDATE_REMINDERS_GIVEN = "system/update_reminders_given"
     ONBOARDING_STEPS = "system/onboarding_steps_completed"
     NUMBER_OF_OPENS = "system/number_of_app_opens"
 
@@ -39,6 +40,14 @@ class Settings(QSettings):
     @onbrd_stps_completed.setter
     def onbrd_stps_completed(self, value):
         self.setValue(f"{self.ONBOARDING_STEPS}", value)
+
+    @property
+    def update_reminders_given(self):
+        return self.value(f"{self.UPDATE_REMINDERS_GIVEN}", 0, type=int)
+
+    @update_reminders_given.setter
+    def update_reminders_given(self, value):
+        self.setValue(f"{self.UPDATE_REMINDERS_GIVEN}", value)
 
     @property
     def warn_if_unprotected(self):
