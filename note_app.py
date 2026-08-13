@@ -30,6 +30,7 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QMenuBar, QStatusBar, QT
 
 from scripts.premium_manager import PremiumTracker
 from scripts.settings_manager import Settings, SettingsDialog
+from scripts.threading import QtThreadRunner
 
 
 class ActivityMonitor(QObject):
@@ -179,6 +180,7 @@ QListWidget{
 
         if all(fresh_install):
             self.settings_manager.is_first_run = True
+            self.settings_manager.onbrd_stps_completed = 0
 
         self.onboarding_steps = [
             "set_password",
@@ -189,12 +191,10 @@ QListWidget{
             "unlock",
             "congrats"
         ]
+
         # We want to check if there are any updates, then we prompt
-        if ((self.settings_manager.update_reminders_given < 3)):
-            self.background_update_check()
-            self.settings_manager.update_reminders_given += 1
-        else:
-            self.update_btn.show()
+
+        self.background_update_check()
 
         if self.settings_manager.onbrd_stps_completed >= len(self.onboarding_steps):
             self.settings_manager.is_first_run = False
@@ -203,12 +203,17 @@ QListWidget{
             self.begin_onboarding()
         else:
             if self.settings_manager.require_password:
+                # 'and' another check (because this reg key can easily be manipulated.)
                 self.lock_app()
                 self.lock.correct = False
                 self.refresh_notes_list()
             else:
                 # Unprotected entry
-                self.unlock_app()
+                if self.lock.validate_silent_password(self.lock.def_password):
+                    self.unlock_app()
+                else:
+                    QMessageBox.critical(
+                        self, "Database encrypted forever", "Your notes are all encrypted and we lost the keys to decrypting it. We apologize for that. You can delete your database to start afresh.")
 
     def begin_onboarding(self, next_step="set_password"):
         """This is recursive in nature. parts of it will call back at the function itself.
@@ -392,6 +397,12 @@ Instead, lock all your notes in {APP_NAME}.""")
         """for search"""
         self.notes = self.db.get_all_notes_with_content()
 
+    def encrypt(self, key, data):
+        return self.lock.encrypt_note(key, data)
+
+    def decrypt(self, key, data):
+        return self.lock.decrypt_note(key, data)
+
     def search(self):
         """TODO: sort based on search result"""
         try:
@@ -405,7 +416,7 @@ Instead, lock all your notes in {APP_NAME}.""")
             final_ranking = []
             for note in self.notes:
                 note_ = note['title']
-                if ((re.search(search_term, f"{note_}: {self.decrypt_note_content(note['content'])}", re.IGNORECASE) is not None)):
+                if ((re.search(search_term, f"{note_}: {self.decrypt(self.lock.crypto.dek, note['content'])}", re.IGNORECASE) is not None)):
                     final_ranking.append(note)
 
             for note in final_ranking:
@@ -475,7 +486,8 @@ Instead, lock all your notes in {APP_NAME}.""")
         self.action_sidebar.addWidget(self.lock_app_btn)
 
         sidebar_layout.addWidget(self.action_sidebar)
-        self.refresh_actions_UI()
+        # self.refresh_actions_UI()
+        # self.lock_app_btn.hide()
 
         # ---------------------------
         # Notes List
@@ -614,9 +626,8 @@ color:#eee;
             lambda: self.obvi_update_check())
 
         self.update_btn = QPushButton("Update Now")
-        self.update_btn.clicked.connect(self.update_now)
+        # self.update_btn.clicked.connect()
         self.update_btn.hide()
-
         self.statusArea.addPermanentWidget(self.update_btn)
 
         help_menu.addAction(self.buy_action)
@@ -625,9 +636,12 @@ color:#eee;
         self.enablePassword = QPushButton("Enable Password")
 
         def enpass():
+            self.settings_dialog = SettingsDialog(
+                self.db, PasswordManager, parent=self)
+            self.settings_dialog.manage_pass_request_at_startup()
             self.settings_manager.require_password = True
             self.inform_user(
-                f"Your {APP_NAME} is now Password Protected. Ensure you remember it though.")
+                f"Your {APP_NAME} is now Password Protected. Ensure you remember your password.")
             self.enablePassword.hide()
 
         self.enablePassword.clicked.connect(enpass)
@@ -640,57 +654,54 @@ color:#eee;
     # Note Management
     # =====================================================
     def background_update_check(self):
-        threading.Thread(target=self._check_for_updates,
-                         args=(True,), daemon=True).start()
-
-    def update_now(self):
-        print("Updating...")
-        pass
+        """Silently Give notification for the availability"""
+        # Assume everything is silent.
+        silent_update_checker = QtThreadRunner(
+            target=self.autoupdate_checker._check)
+        silent_update_checker.finished.connect(
+            lambda: self.silent_update_notify())
+        # silent_update_checker.progress.connect(lambda: print("checking"))
+        silent_update_checker.start()
 
     def obvi_update_check(self):
         """Give notification for the availability"""
-        threading.Thread(target=self._check_for_updates,
-                         args=(False,), daemon=True).start()
+        loud_update_checker = QtThreadRunner(
+            target=self.autoupdate_checker._check)
+        loud_update_checker.finished.connect(self.loud_update_notify)
+        loud_update_checker.start()
 
-    def get_update_availability_status(self, status):
-        if status:
+    def silent_update_notify(self):
+        if self.autoupdate_checker.get_update_available():
             self.inform_user(
-                f"Your {APP_NAME} needs an update to stay secure.")
+                f"Update available. Your {APP_NAME} needs an update to stay secure.")
             self.update_btn.show()
-        elif not status:
+        elif self.autoupdate_checker.get_update_available() is False:
+            self.inform_user("No update available yet")
             self.update_btn.hide()
-        else:
+        elif self.autoupdate_checker.get_update_available() is None:
+            # silently fail.
+            self.inform_user("No connection to check for updates")
             print("some error")
             pass
 
-        # silently fail.
-
-        return status
-
-    def _check_for_updates(self, silent=False):
-        update_is_available = self.autoupdate_checker._check()
-        if silent:
-            self.update_is_available = self.get_update_availability_status(
-                update_is_available)
-
-        if not silent:
-            if update_is_available:
-                a = QMessageBox()
-                a.setIcon(a.Icon.Information)
-                a.setWindowTitle(f"{APP_NAME} update is available")
-                a.setText(
-                    f"{APP_NAME} needs an update. Do you want to install updates now?")
-                update = a.addButton("Yes", a.ButtonRole.AcceptRole)
-                # Do the actual download. same as the subtle statusArea button
-                update.clicked.connect()
-                a.addButton("No", a.ButtonRole.RejectRole)
-                a.exec()
-            elif update_is_available is False:
-                a = QMessageBox.information(None, f"{APP_NAME} is Up to Date",
-                                            f"{APP_NAME} is Up to date.")
-            else:
-                QMessageBox.critical(
-                    None, "Something happened", f"Update checking encountered a problem, might be from our server or a connection problem. Try checking for updates later.")
+    def loud_update_notify(self):
+        if self.autoupdate_checker.get_update_available():
+            a = QMessageBox()
+            a.setIcon(a.Icon.Information)
+            a.setWindowTitle(f"{APP_NAME} update is available")
+            a.setText(
+                f"{APP_NAME} needs an update. Do you want to install updates now?")
+            update = a.addButton("Yes", a.ButtonRole.AcceptRole)
+            # Do the actual download. same as the subtle statusArea button
+            update.clicked.connect()
+            a.addButton("No", a.ButtonRole.RejectRole)
+            a.exec()
+        elif self.autoupdate_checker.get_update_available() is False:
+            a = QMessageBox.information(None, f"{APP_NAME} is Up to Date",
+                                        f"{APP_NAME} is Up to date.")
+        else:
+            QMessageBox.critical(
+                None, "Something happened", f"Update checking encountered a problem, might be from our server or a connection problem. Try checking for updates later.")
 
     def open_license_buy(self):
         """Manage Licenser"""
@@ -754,24 +765,27 @@ color:#eee;
             self.unlock_app()
 
     def refresh_actions_UI(self):
+        # self.action_sidebar.clear()
         for act in self.app_actions:
             if "new" in act.lower():
-                self.new_note_btn.setVisible(True)
+                self.action_sidebar.addWidget(self.new_note_btn)
+                self.new_note_btn.show()
 
             elif "del" in act.lower():
-                self.del_note_btn.setVisible(True)
+                self.action_sidebar.addWidget(self.del_note_btn)
+                self.del_note_btn.show()
 
             elif "lock" in act.lower():
                 if self.settings_manager.require_password:
-                    self.lock_app_btn.setVisible(True)
-
+                    self.action_sidebar.addWidget(self.lock_app_btn)
+                    self.lock_app_btn.show()
                 else:
-                    self.lock_app_btn.setVisible(False)
+                    self.lock_app_btn.hide()
 
     def unlock_app(self):
         self.db = DatabaseManager()
         self.refresh_notes_list()
-        self.refresh_actions_UI()
+        # self.refresh_actions_UI()
         self.editor.blockSignals(False)
         self.title_entry.blockSignals(False)
         self.editor.blockSignals(False)
@@ -857,8 +871,9 @@ color:#eee;
 
     def is_premium_user(self):
         """This will be defined by the presence of the license key. If it has been tampered, then we automatically lock the app again by returning False. until the user resolves their issue, only then, we return True."""
-        return self.license_man.is_premium_user()
-        # return True
+        # XXX XXX XXX XXX: TODO: TODO
+        # return self.license_man.is_premium_user()
+        return True
 
     def inform_user(self, info, col="#f6f6f6", for_secs=8):
         self.statusArea.showMessage(info, for_secs*1000)
@@ -869,9 +884,10 @@ color:#eee;
         c_content = self.editor.toPlainText().strip()
 
         self.editor.setFontPointSize(self.main_text_size)
+
         # ensure there's something before saving.
         if c_content:
-            c_content = self.lock.encrypt_note(
+            c_content = self.encrypt(
                 self.lock.crypto.dek, c_content)
 
             if not c_title:
@@ -966,28 +982,33 @@ color:#eee;
             return
 
         title = ""
-        content = ""
+        c_content = ""
         if self.current_note_id is None:
             title = self.title_entry.text()
-            content = self.editor.toPlainText()
+            c_content = self.editor.toPlainText()
 
         self.current_note_id = None
 
-        note_id = self.db.create_note(title, content)
+        if c_content.strip():
+            c_content = self.lock.encrypt_note(
+                self.lock.crypto.dek, c_content)
+
+        note_id = self.db.create_note(title, c_content)
 
         self.current_note_id = note_id
 
-        self.refresh_notes_list()
         # self.display_note_content()
-        self.select_note(note_id)
 
         if (not title.strip()):
             self.title_entry.setText("Untitled")
-            if not content.strip():
+            if not c_content.strip():
                 self.editor.clear()
                 self.title_entry.setFocus()
                 self.title_entry.selectAll()
             return
+
+        self.refresh_notes_list()
+        self.select_note(note_id)
 
     def select_note(self, note_id):
         # Automatically select the new note
@@ -1034,7 +1055,7 @@ color:#eee;
 
         try:
             if c_content.strip():
-                c_content = self.lock.decrypt_note(
+                c_content = self.decrypt(
                     self.lock.crypto.dek, c_content)
             else:
                 self.editor.setPlaceholderText(
@@ -1042,7 +1063,7 @@ color:#eee;
         except Exception as e:
             print(e)
             self.editor.setPlaceholderText(
-                "Sorry, this note is not decryptable, it is lost forever.")
+                "Sorry, this note is empty and not decryptable, it can be lost forever.")
 
         # Prevent autosave from firing while loading
 

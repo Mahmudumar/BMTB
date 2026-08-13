@@ -1,3 +1,8 @@
+from PyQt5.QtWidgets import QApplication, QLabel, QProgressBar, QPushButton, QVBoxLayout, QWidget
+from PyQt5.QtCore import QMetaObject, Qt, pyqtSlot
+from concurrent.futures import ThreadPoolExecutor
+import time
+import sys
 import re
 import logging
 import requests
@@ -22,12 +27,6 @@ class AutoUpdater:
 
         if not UPDATE_DOWNLOAD_FOLDER.exists():
             os.makedirs(UPDATE_DOWNLOAD_FOLDER, exist_ok=True)
-
-    def check_update_background(self):
-        """Run version check in background thread
-          SILENTLY by default."""
-        # self._check()
-        threading.Thread(target=self._check, daemon=True).start()
 
     def _check(self):
         try:
@@ -62,10 +61,13 @@ class AutoUpdater:
                 return False
 
         except Exception as e:
+            self.update_available = None
             print(f"check failed: {e}")
             logging.error(f"Update check failed: {e}")
-            self.update_available = None
             return None
+
+    def get_update_available(self):
+        return self.update_available
 
     def download_and_install(self, url):
         """Download installer with optional progress hook."""
@@ -128,14 +130,6 @@ class AutoUpdater:
             logging.info("New version not detected. No files deleted.")
 
 
-
-import sys
-import time
-from concurrent.futures import ThreadPoolExecutor
-from PyQt5.QtCore import QMetaObject, Qt, pyqtSlot
-from PyQt5.QtWidgets import QApplication, QLabel, QProgressBar, QPushButton, QVBoxLayout, QWidget
-
-
 class InstallerApp(QWidget):
 
     def __init__(self):
@@ -150,7 +144,7 @@ class InstallerApp(QWidget):
 
         # 2. UI Widgets
         self.status_label = QLabel("Ready to install.", self)
-        
+
         self.progress_bar = QProgressBar(self)
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
@@ -167,28 +161,31 @@ class InstallerApp(QWidget):
 
     # 3. The background installation target (Run in another thread)
     def run_installer_process(self):
-        steps = ["Extracting files...", "Copying assets...", "Creating shortcuts...", "Cleaning up..."]
-        
+        steps = ["Extracting files...", "Copying assets...",
+                 "Creating shortcuts...", "Cleaning up..."]
+
         for i, step in enumerate(steps):
             # Update the UI text safely via Thread-Safe Method Invocation
-            QMetaObject.invokeMethod(self.status_label, "setText", Qt.QueuedConnection, Q_ARG(str, step))
-            
+            QMetaObject.invokeMethod(
+                self.status_label, "setText", Qt.QueuedConnection, Q_ARG(str, step))
+
             # Simulate a chunk of download/install work
-            time.sleep(1) 
-            
+            time.sleep(1)
+
             # Calculate and update progress percentage
             progress = int(((i + 1) / len(steps)) * 100)
-            QMetaObject.invokeMethod(self.progress_bar, "setValue", Qt.QueuedConnection, Q_ARG(int, progress))
+            QMetaObject.invokeMethod(
+                self.progress_bar, "setValue", Qt.QueuedConnection, Q_ARG(int, progress))
 
         return "Installation Completed Successfully!"
 
     def start_installation(self):
         self.start_button.setEnabled(False)
         self.progress_bar.setValue(0)
-        
+
         # 4. Push the installer task to the background thread
         future = self.executor.submit(self.run_installer_process)
-        
+
         # 5. Catch the final return value when finished
         future.add_done_callback(self.on_installation_finished)
 
@@ -197,11 +194,14 @@ class InstallerApp(QWidget):
         try:
             # Catch the return string from our background function
             final_result = future.result()
-            
+
             # Safely push final updates to the GUI thread
-            QMetaObject.invokeMethod(self.status_label, "setText", Qt.QueuedConnection, Q_ARG(str, final_result))
+            QMetaObject.invokeMethod(
+                self.status_label, "setText", Qt.QueuedConnection, Q_ARG(str, final_result))
         except Exception as e:
-            QMetaObject.invokeMethod(self.status_label, "setText", Qt.QueuedConnection, Q_ARG(str, f"Error: {str(e)}"))
+            QMetaObject.invokeMethod(
+                self.status_label, "setText", Qt.QueuedConnection, Q_ARG(str, f"Error: {str(e)}"))
         finally:
             # Re-enable the button via UI thread safety
-            QMetaObject.invokeMethod(self.start_button, "setEnabled", Qt.QueuedConnection, Q_ARG(bool, True))
+            QMetaObject.invokeMethod(
+                self.start_button, "setEnabled", Qt.QueuedConnection, Q_ARG(bool, True))

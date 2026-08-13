@@ -2,6 +2,7 @@
 import os
 import shutil
 from pathlib import Path
+import subprocess
 import sys
 from packaging.version import Version
 import scripts.constants
@@ -15,6 +16,12 @@ from scripts.constants import (
     write_json_file,
     read_json_file
 )
+
+# test for windows blocking this.
+try:
+    subprocess.run("makensis")
+except OSError as e:
+    print(f"Windows is blocking nsis {e}")
 
 # -----------------------------------------
 # Load previous deploy info or initialize
@@ -61,7 +68,8 @@ def confirm_version(d_i):
 
 # Ask for version update
 start = confirm_version(deploy_info)
-APP_FULLNAME = f"{deploy_info['APP_NAME']} {deploy_info['APP_VERSION']}"
+# Because we want every version to automatically override its previous version, we will set the app name exe itself to be just the app name.
+APP_FULLNAME = f"{deploy_info['APP_NAME']}"
 
 # NSIS installer template
 
@@ -214,7 +222,7 @@ def write_nsi(d_i=deploy_info):
 
 
 def compile_installer(nsi_path):
-    os.system(f'makensis "{nsi_path}"')
+    subprocess.run(f'makensis "{nsi_path}"')
 
 # Main deployment flow
 

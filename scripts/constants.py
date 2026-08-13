@@ -34,7 +34,7 @@ APP_NAME = "Thought Book"
 # for now, manually change
 # the version to match the
 # update.json and the deploy.
-APP_VERSION = "2.0.3"
+APP_VERSION = "2.0.4"
 APP_SHORT_NAME = "BMTB"
 
 
@@ -179,7 +179,7 @@ To activate, please paste your License Key below.
 
 If you don’t have a license yet, click below to purchase one.
 """
-MAX_NOTE_AMOUNT = 15
+MAX_NOTE_AMOUNT = 100
 PREMIUM_FEATURES = ["unlimited_notes", "autolock"]
 MAX_REMINDER_ABOUT_UPGRADE = 3
 

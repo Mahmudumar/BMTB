@@ -37,11 +37,6 @@ class SettingsDialog(QDialog):
         # initialize the class
 
         self.parent_app = parent
-        self.lock = pman_uninit_class(self.db, self.settings_manager)
-        self.current_password = self.lock.get_hashed()
-        self.has_existing_password = self.current_password is not None
-
-        self.require_pass_at_startup = self.settings_manager.require_password
 
         self.init_ui()
 
@@ -57,7 +52,7 @@ class SettingsDialog(QDialog):
         # -----------------------------
 
         self.require_password = QCheckBox("Request Password at startup")
-        self.require_password.setObjectName("require_pass_at_startup")
+        self.require_password.setObjectName("require_password")
 
         gotten_setting = self.settings_manager.require_password
 
@@ -149,6 +144,36 @@ class SettingsDialog(QDialog):
             self.db, self.settings_manager, change=True)
         lock.exec()
 
+    def manage_pass_request_at_startup(self):
+        self.lock = self.password_manager(self.db, self.settings_manager)
+        self.stored_pass_hash = self.lock.get_hashed()
+        self.def_pass_hash = self.lock.pass_hash(self.lock.def_password)
+        self.cannot_create_new_pass = (
+            self.stored_pass_hash != self.def_pass_hash)
+
+        if self.cannot_create_new_pass:
+            self.lock = self.password_manager(
+                self.db, self.settings_manager)
+            self.lock.exec()
+            if not self.lock.correct:
+                # keep it locked, they must remember their password.
+                self.require_password.setChecked(True)
+                self.settings_manager.require_password = True
+                return
+            try:
+                user_old_password = self.lock.password
+                new_generated_password = self.lock.def_password  # very dangerous
+                self.lock.save_changed(user_old_password,
+                                       new_generated_password)
+                del user_old_password
+            except Exception as e:
+                print(e)
+        else:
+            lock = self.password_manager(
+                self.db, self.settings_manager, new=True, new_change=True)
+            lock.exec()
+            return
+
     def set_setting(self, widget: QPushButton | QCheckBox):
         """The objectName of the `widget` must match the setting key. e.g., require_pass_at_startup"""
         obj_name = widget.objectName()
@@ -161,25 +186,12 @@ class SettingsDialog(QDialog):
         if isinstance(widget, QCheckBox):
             if "require_pass" in obj_name:
                 if self.require_password.isChecked():
+                    self.manage_pass_request_at_startup()
                     self.settings_manager.require_password = True
                 else:
+                    self.manage_pass_request_at_startup()
                     self.settings_manager.require_password = False
                     self.settings_manager.autolock_enabled = False
-
-                if self.has_existing_password:
-                    lock = self.password_manager(
-                        self.db, self.settings_manager)
-                    lock.exec()
-                    if not lock.correct:
-                        self.require_password.setChecked(True)
-                        self.settings_manager.require_password = True
-                        # keep it locked, they must remember their password.
-                        return
-                else:
-                    lock = self.password_manager(
-                        self.db, self.settings_manager, new=True)
-                    lock.exec()
-                    return
 
             elif "autolock" in obj_name:
                 if self.autolock_app.isChecked():
@@ -219,46 +231,6 @@ class SettingsDialog(QDialog):
 
     def refresh_ui(self):
         self.init_ui()
-
-    def save_password(self):
-
-        if self.has_existing_password:
-            if self.old_password_input.text() != self.current_password:
-                QMessageBox.critical(
-                    self,
-                    "Incorrect Password",
-                    "The current password is incorrect."
-                )
-                return
-
-        new_password = self.new_password_input.text().strip()
-        confirm = self.confirm_password_input.text().strip()
-
-        if not new_password:
-            QMessageBox.warning(
-                self,
-                "Invalid Password",
-                "Password cannot be empty."
-            )
-            return
-
-        if new_password != confirm:
-            QMessageBox.warning(
-                self,
-                "Password Mismatch",
-                "The passwords do not match."
-            )
-            return
-        
-        print(new_password)
-
-        QMessageBox.information(
-            self,
-            "Success",
-            "Password saved successfully."
-        )
-
-        self.accept()
 
     # =====================================================
     # Clear Notes

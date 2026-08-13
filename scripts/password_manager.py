@@ -169,21 +169,20 @@ class SimpleSubstitution:
 
 
 class PasswordManager(QDialog):
-    def __init__(self, db: DatabaseManager, settings_manager, new=False, change=False, parent=None) -> None:
+    def __init__(self, db: DatabaseManager, settings_manager, new=False, change=False, parent=None, new_change=False) -> None:
+
         super().__init__(parent)
         self.setWindowIcon(QIcon(str(APP_PHOTO)))
         self.parent_app = parent
+        self.def_password = "user123"
         self.correct = False
         self.db = db
+        self.turning_require_password_back_on = new_change
         self.settings_manager = settings_manager
         self.set_new = new
         self.change_pass = change
 
         self.password_file = PASS_FILE
-        self.cipher = SimpleCipher()
-
-        # NOTE: This is required as the first sanity check.
-        self.init_ui()
 
         self.hashed = None
 
@@ -191,6 +190,23 @@ class PasswordManager(QDialog):
             self.hashed = self.get_hashed()
 
         self.crypto = Cryptography()
+
+        # do the check from the beginning of the password init
+        # check if there are notes in the vault and disallow creating new
+        # if self.notes_present():
+        #     self.set_new = False
+
+        # NOTE: This is required as the first sanity check.
+        self.init_ui()
+
+    def pass_hash(self, password):
+        """Return the hash of a password"""
+        return self.crypto.pass_hash(password)
+
+    def notes_present(self):
+        """It is always crucial we must have notes to protect. The only time, password_manager(new=True) is allowed, is when there are no notes in the vault."""
+        # XXX: inefficient check, soon to change
+        return bool(len(self.db.get_all_notes()))
 
     def encrypt_note(self, key, note_content: str):
         # TODO
@@ -235,7 +251,11 @@ class PasswordManager(QDialog):
                 "Password Hint:",
                 self.password_hint_input
             )
-            self.save_button.clicked.connect(self.okay_new)
+            if not self.turning_require_password_back_on:
+                self.save_button.clicked.connect(self.okay_new)
+            else:
+                self.save_button.clicked.connect(
+                    lambda: self.okay_resetting_after_require_off())
 
         elif self.change_pass:
             self.setWindowTitle("Change Password")
@@ -255,8 +275,8 @@ class PasswordManager(QDialog):
             self.save_button.clicked.connect(self.okay_new_change)
 
         else:
-            ps_hint = self.settings_manager.password_hint
-            if ps_hint:
+            ps_hint = self.db.get_config("password_hint")
+            if ps_hint.strip():
                 self.set_message(
                     f"{self.status.text()}\nPassword Hint: {ps_hint}".strip(), "#21ec21")
             self.password_input = QLineEdit()
@@ -284,173 +304,68 @@ class PasswordManager(QDialog):
 
     def get_hashed(self):
         """The last place to check is the DB itself"""
-
-        def search_pass_file():
-            # Attempt 1
-            if self.password_file.exists():
-                with open(self.password_file, 'r') as f:
-                    passfile_hash = f.readline().strip()
-                if passfile_hash:
-                    return passfile_hash
-                else:
-                    return ""
-            else:
-                return ""
-
-        def search_regs():
-            # Attempt 2: get the pass saved from reg.
-            p_hist_stored_hash = str(self.settings_manager.password_version)
-            if (p_hist_stored_hash.strip()):
-                return p_hist_stored_hash.strip()
-            else:
-                print("p_hist also tampered. Security flags raised: 2")
-                return ""
-
         def search_db():
             # Attempt 3: get it from the db itself.
-            db_stored_hash = str(self.db.get_config("master_password"))
+            db_stored_hash = str(self.db.get_config("password_hash"))
             if db_stored_hash.strip():
-                return db_stored_hash.strip()
+                return db_stored_hash
             else:
                 return ""
 
-        passfile_stored_hash = search_pass_file()
-        reg_hash = search_regs()
         stored_hash = search_db()
 
-        def check():
-            sh = stored_hash or None
-            rh = reg_hash or None
-            ph = passfile_stored_hash or None
-            print(sh == rh == ph)
+        return stored_hash or None
 
-        check()
-
-        return stored_hash or passfile_stored_hash or reg_hash or None
-
-    def save_hashed(self, new_pass_hash):
-        """save the hashed password"""
-
-        with open(self.password_file, 'w') as f:
-            f.write(new_pass_hash)
-
-        self.db.set_config("password_hash", new_pass_hash)
-
-        self.settings_manager.password_version = new_pass_hash
-
-    def _okay_new_change(self):
-        self.password = self.hashed
-        if self.password is not None:
-            if self.cipher.pass_hash(self.old_password_input.text()) != self.password:
-                QMessageBox.critical(
-                    self,
-                    "Incorrect Password",
-                    "The current password is incorrect."
-                )
-                return
-
-        new_password = self.new_password_input.text().strip()  # type: ignore
-        confirm = self.confirm_password_input.text().strip()  # type: ignore
-
-        if not new_password:
-            QMessageBox.warning(
-                self,
-                "Invalid Password",
-                "Password cannot be empty."
-            )
-            return
-
-        if new_password != confirm:
-            QMessageBox.warning(
-                self,
-                "Password Mismatch",
-                "The passwords do not match."
-            )
-            return
-
-        hashed = self.cipher.pass_hash(confirm)
-        self.save_hashed(hashed)
-        self.save_password_hint()
-
-        QMessageBox.information(
-            self,
-            "Success",
-            "Password saved successfully."
-        )
+    def save_changed(self, old: str, new: str):
+        """This function was created because of the case of when a user disables require password, we need a password to decrypt their notes at all times (because the .db itself must be always encrypted), so as soon as they turn off that 'require pass' setting, we will use that confirmation to generate a new password, then just automatically log in when user enters the app the next time."""
+        # NOTE: unlock DEK first
         try:
-            assert self.old_password_input is not None
-            self.old_password_input.clear()
-            assert self.new_password_input is not None
-            self.new_password_input.clear()
-            assert self.confirm_password_input is not None
-            self.confirm_password_input.clear()
-            assert self.password_input is not None
-            self.password_input.clear()
-        except Exception:
-            pass
-
-        self.correct = True
-        self.accept()
-
-    def _okay_new(self):
-        self.password = self.new_password_input.text()
-
-        if not (self.confirm_password_input.text() == self.new_password_input.text()):
-            QMessageBox.critical(
-                self,
-                "Password Mismatch",
-                "Confirm and new Password must match exactly")
-            return
-        hashed = self.cipher.pass_hash(self.password)
-        QMessageBox.information(self, "Password Set", "Password Set, Welcome")
-        self.correct = True
-
-        try:
-            assert self.old_password_input is not None
-            self.old_password_input.clear()
-            assert self.new_password_input is not None
-            self.new_password_input.clear()
-            assert self.confirm_password_input is not None
-            self.confirm_password_input.clear()
-            assert self.password_input is not None
-            self.password_input.clear()
-        except Exception:
-            pass
-
-        self.accept()
-
-    def _okay(self):
-        self.password = self.password_input.text()
-
-        try:
-            assert self.password_input is not None
-            self.password_input.clear()
-        except Exception:
-            pass
-
-        if self.hashed is not None:
-            if self.cipher.pass_hash(self.password) == self.hashed:
-                self.correct = True
-                # Initiate the repopulation
-                self.get_hashed()
-
-                self.accept()
-            else:
-                QMessageBox.critical(self, "Incorrect Password",
-                                     "Incorrect Password, Please try again.")
-
-        else:
-            QMessageBox.critical(
-                self, "Corrupt password file",
-                "Pass file, tampered with.")
-
-    def okay_new_change(self):
-        def save_changed(old, new):
-            # NOTE: unlock DEK first
             stored_DEK = self.db.get_config("encDEK").encode()
             stored_salt = base64.urlsafe_b64decode(
                 self.db.get_config("salt").encode())
             self.crypto.unlock(old, stored_salt, stored_DEK)
+        except Exception as e:
+            QMessageBox.critical(self, "Something's wrong",
+                                 f"While decrypting prev password: {e}")
+            print("wrong password or salt was changed")
+            print(e)
+            return
+        try:
+            # The DEK is now decrypted by our KEK gotten from our old config. Ready to be encrypted with the new kek
+            decrypted_DEK = self.crypto.dek
+
+            # THEN CREATE NEW KEK and REENCRYPT the DEK with it.
+            new_salt = self.crypto.generate_salt()
+            new_KEK = self.crypto.derive_KEK(new, new_salt)
+            new_enc_DEK = self.crypto.encrypt_DEK(new_KEK, decrypted_DEK)
+
+            hashed_pass = self.crypto.pass_hash(new)
+            new_salt_stored = base64.urlsafe_b64encode(new_salt)
+
+            self.db.set_config("encDEK", new_enc_DEK.decode())
+            self.db.set_config("password_hash", hashed_pass)
+            self.db.set_config("salt", new_salt_stored.decode())
+
+            self.crypto.unlock(new, new_salt, new_enc_DEK)
+        except Exception as e:
+            QMessageBox.critical(self, "Something's wrong",
+                                 f"While saving the password{e}")
+            print("wrong password or salt was changed")
+            print(e)
+            return
+
+    def okay_new_change(self):
+        def save_changed(old: str, new: str):
+            # NOTE: unlock DEK first
+            try:
+                stored_DEK = self.db.get_config("encDEK").encode()
+                stored_salt = base64.urlsafe_b64decode(
+                    self.db.get_config("salt").encode())
+                self.crypto.unlock(old, stored_salt, stored_DEK)
+            except Exception as e:
+                print("wrong password or salt was changed")
+                print(e.__cause__)
+                return
 
             # The DEK is now decrypted by our KEK gotten from our old config. Ready to be encrypted with the new kek
             decrypted_DEK = self.crypto.dek
@@ -461,19 +376,21 @@ class PasswordManager(QDialog):
             new_enc_DEK = self.crypto.encrypt_DEK(new_KEK, decrypted_DEK)
 
             hashed_pass = self.crypto.pass_hash(new)
+            new_salt_stored = base64.urlsafe_b64encode(new_salt)
 
             self.db.set_config("encDEK", new_enc_DEK.decode())
             self.db.set_config("password_hash", hashed_pass)
-            new_salt_stored = base64.urlsafe_b64encode(new_salt)
             self.db.set_config("salt", new_salt_stored.decode())
+
             self.crypto.unlock(new, new_salt, new_enc_DEK)
 
         old_pass = self.old_password_input.text()
         new_pass = self.new_password_input.text()
         confirm_pass = self.confirm_password_input.text()
-        stored_hash = self.db.get_config("password_hash")
+        pass_hint = self.password_hint_input.text()
 
-        if self.crypto.pass_hash(old_pass) == stored_hash:
+        stored_hash = self.db.get_config("password_hash")
+        if self.crypto.pass_hash(old_pass) != stored_hash:
             # incorrect old pass word.
             QMessageBox.critical(
                 self,
@@ -489,12 +406,16 @@ class PasswordManager(QDialog):
             )
             return
         try:
+
             save_changed(old_pass, new_pass)
+            self.db.set_config("password_hint", pass_hint)
             QMessageBox.information(
                 self,
                 "Success",
                 "Password saved successfully."
             )
+            self.accept()
+            return
         except Exception as e:
             print(e)
             QMessageBox.information(
@@ -545,6 +466,12 @@ class PasswordManager(QDialog):
 
         self.accept()
 
+    def okay_resetting_after_require_off(self):
+        """This is for when turning back the require pass option back on...it will change from the default password to the new password"""
+        old, new = self.def_password, self.confirm_password_input.text()
+        self.save_changed(old, new)
+        self.accept()
+
     def unlock_DEK(self, password):
         encDEK = self.db.get_config("encDEK").encode()
         salt = base64.urlsafe_b64decode(self.db.get_config("salt").encode())
@@ -556,6 +483,9 @@ class PasswordManager(QDialog):
 
     def okay(self):
         password = self.password_input.text().strip()
+
+        # developed for when user wants to turn off require pass.
+        self.password = password
         # How can we know if the DEK is valid
 
         try:
@@ -564,8 +494,6 @@ class PasswordManager(QDialog):
         except Exception:
             pass
 
-        # NOTE: Are we decrypting all the .db contents in the sense that all the notes in the db are plain after decryption or do we just do that when we want to display a particular.
-        print("getting DEK")
         try:
             if self.db.get_config("password_hash") == self.crypto.pass_hash(password):
                 self.correct = True
@@ -577,3 +505,13 @@ class PasswordManager(QDialog):
         except Exception as e:
             QMessageBox.information(
                 self, "Tampered Database", "Your Notes database might have been tampered with.")
+
+    def validate_silent_password(self, password):
+        """`password=""` is used for silent logins."""
+        if self.db.get_config("password_hash") == self.crypto.pass_hash(password):
+            self.correct = True
+            self.unlock_DEK(password)
+            return True
+        else:
+            self.correct = False
+            # tampered with default password or something else.
