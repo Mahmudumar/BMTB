@@ -3,7 +3,7 @@ import re
 import threading
 
 from PyQt5 import QtCore
-from PyQt5.QtCore import QObject, QEvent, QTimer
+from PyQt5.QtCore import QObject, QEvent, QTimer, pyqtSignal, pyqtSlot
 from scripts.auto_updater import AutoUpdater
 from scripts.database_manager import DatabaseManager
 from scripts.license_manager import LicenseManager
@@ -30,8 +30,7 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QMenuBar, QStatusBar, QT
 
 from scripts.premium_manager import PremiumTracker
 from scripts.settings_manager import Settings, SettingsDialog
-from scripts.threading import QtThreadRunner
-
+from scripts.threading import Signals
 
 class ActivityMonitor(QObject):
     def __init__(self, autolock_timer: QTimer, parent=None):
@@ -71,10 +70,12 @@ class OnBoardingTracker(QObject):
         return False
 
 
+
 class NoteApp(QMainWindow):
     def __init__(self, parent: QApplication):
         super().__init__()
         self.master = parent
+        self.signals = Signals()
 
         self.db = DatabaseManager()
         self.settings_manager = Settings(self.db)
@@ -132,6 +133,7 @@ QListWidget{
         # COUNTERS and VARIABLES
         self.buy_btn_col_flipper = 0
         self.times_reminded_about_password_protection = 0
+        self.times_reminded_about_autolock = 0
 
         # Delayed autosave timer
         self.autosave_timer = QTimer(self)
@@ -141,12 +143,12 @@ QListWidget{
         self.license_man = LicenseManager(self)
         self.license_man.load_and_validate_license()
 
+        self.init_ui()
+        self.show()
+
         if not self.is_premium_user():
             threading.Thread(target=self.license_man.server_ping_and_price_get,
                              daemon=True).start()
-
-        self.init_ui()
-        self.show()
 
         NOO = self.settings_manager.number_of_opens
         self.settings_manager.number_of_opens = NOO + 1
@@ -154,23 +156,18 @@ QListWidget{
         self.lock = PasswordManager(
             self.db, self.settings_manager, parent=self)
 
+        self.autolock_timer = QTimer(self)
+        self.autolock_event_listener = ActivityMonitor(
+            self.autolock_timer, parent=self)
+
         # Autolock Timer
         if self.settings_manager.autolock_enabled:
-            self.autolock_timer = QTimer(self)
             if self.is_premium_user():
-                self.autolock_event_listener = ActivityMonitor(
-                    self.autolock_timer, parent=self)
-                self.autolock_timer.timeout.connect(self.lock_app)
-                self.set_autolock_timer_interval()
-                self.master.installEventFilter(self.autolock_event_listener)
+                self.install_autolock_timer()
 
         hashes_tampered = [
             False
         ]
-
-        # TODO: Another security idea is for the hash to be recognized by every note, we will propagate the hash that locked them and update them everytime the user changes password so that an attacker cannot just create a new hash of a password they know, then put in the stolen database, if there's a mismatch, we will flag that there's an unknown hash in the master_password of the db. We will encrypt the hashes together with the note titles, when the titles are being loaded (after being decrypted, we extract and remove the hash)
-
-        # NOTE: If there's no notes.db we don't have anything to protect. So we can ask for a new password and save it in that NEW db. Encrypt the DB too.
 
         fresh_install = [
             ((not self.db.get_config("encDEK").strip()) and (
@@ -193,8 +190,8 @@ QListWidget{
         ]
 
         # We want to check if there are any updates, then we prompt
-
         self.background_update_check()
+        
 
         if self.settings_manager.onbrd_stps_completed >= len(self.onboarding_steps):
             self.settings_manager.is_first_run = False
@@ -205,15 +202,18 @@ QListWidget{
             if self.settings_manager.require_password:
                 # 'and' another check (because this reg key can easily be manipulated.)
                 self.lock_app()
-                self.lock.correct = False
+                # self.lock.correct = False
                 self.refresh_notes_list()
             else:
                 # Unprotected entry
                 if self.lock.validate_silent_password(self.lock.def_password):
                     self.unlock_app()
                 else:
-                    QMessageBox.critical(
-                        self, "Database encrypted forever", "Your notes are all encrypted and we lost the keys to decrypting it. We apologize for that. You can delete your database to start afresh.")
+                    if self.lock.get_hashed() is not None:
+                        # The password
+                        self.settings_manager.require_password = True
+                        self.lock_app(
+                            "Some settings are being tampered with. Please enter your set password.")
 
     def begin_onboarding(self, next_step="set_password"):
         """This is recursive in nature. parts of it will call back at the function itself.
@@ -633,41 +633,66 @@ color:#eee;
         help_menu.addAction(self.buy_action)
         help_menu.addAction(self.update_check_action)
 
+        # Quick settings shown in statusArea
         self.enablePassword = QPushButton("Enable Password")
+        self.enableAutolock = QPushButton("Enable Autolock")
 
         def enpass():
             self.settings_dialog = SettingsDialog(
                 self.db, PasswordManager, parent=self)
             self.settings_dialog.manage_pass_request_at_startup()
-            self.settings_manager.require_password = True
-            self.inform_user(
-                f"Your {APP_NAME} is now Password Protected. Ensure you remember your password.")
+            if self.settings_manager.require_password:
+                self.inform_user(
+                    f"Your {APP_NAME} is now Password Protected. Ensure you remember your password.")
+            else:
+                # leave the button there,
+                return
             self.enablePassword.hide()
+
+        def enautolock():
+            self.settings_dialog = SettingsDialog(
+                self.db, PasswordManager, parent=self)
+
+            self.settings_dialog.manage_autolock_setup()
+            if self.settings_manager.autolock_enabled:
+                self.install_autolock_timer()
+
+            self.inform_user(
+                f"After {self.settings_manager.autolock_minutes} minutes of inactivity, your {APP_NAME} will automatically lock.")
+            self.enableAutolock.hide()
 
         self.enablePassword.clicked.connect(enpass)
         self.enablePassword.setStyleSheet("color:#ccc;")
         self.enablePassword.hide()
 
-        self.statusArea.addPermanentWidget(self.enablePassword)
+        self.enableAutolock.clicked.connect(enautolock)
+        self.enableAutolock.setStyleSheet("color:#ccc;")
+        self.enableAutolock.hide()
 
-    # =====================================================
-    # Note Management
-    # =====================================================
+        self.statusArea.addPermanentWidget(self.enablePassword)
+        self.statusArea.addPermanentWidget(self.enableAutolock)
+
+    def install_autolock_timer(self):
+        """Instantiate the autolock timer: This is for when autolock is turned on, everytime the setting is true, whether from settings or from reading from the reg, then this is what instantiates the timer, so that the user doesn't have to restart the app for timer to take effect"""
+        self.autolock_timer.timeout.connect(self.lock_app)
+        self._set_autolock_timer_interval()
+        self.master.installEventFilter(self.autolock_event_listener)
+
     def background_update_check(self):
         """Silently Give notification for the availability"""
         # Assume everything is silent.
-        silent_update_checker = QtThreadRunner(
-            target=self.autoupdate_checker._check)
-        silent_update_checker.finished.connect(
-            lambda: self.silent_update_notify())
-        # silent_update_checker.progress.connect(lambda: print("checking"))
+        self.signals.finished.connect(self.silent_update_notify)
+        self.signals.progress.connect(lambda: print("Checking update"))
+        silent_update_checker = threading.Thread(
+            target=self.autoupdate_checker._check, name="background_check_thread", args=(self.signals,), daemon=True)
         silent_update_checker.start()
 
     def obvi_update_check(self):
         """Give notification for the availability"""
-        loud_update_checker = QtThreadRunner(
-            target=self.autoupdate_checker._check)
-        loud_update_checker.finished.connect(self.loud_update_notify)
+        self.signals.finished.connect(self.loud_update_notify)
+        self.signals.progress.connect(lambda: print("Checking update"))
+        loud_update_checker = threading.Thread(
+            target=self.autoupdate_checker._check, args=(self.signals,), name="obvious_check_thread", daemon=True)
         loud_update_checker.start()
 
     def silent_update_notify(self):
@@ -680,8 +705,8 @@ color:#eee;
             self.update_btn.hide()
         elif self.autoupdate_checker.get_update_available() is None:
             # silently fail.
-            self.inform_user("No connection to check for updates")
-            print("some error")
+            # self.inform_user("No connection to check for updates")
+            print("No internet")
             pass
 
     def loud_update_notify(self):
@@ -690,10 +715,10 @@ color:#eee;
             a.setIcon(a.Icon.Information)
             a.setWindowTitle(f"{APP_NAME} update is available")
             a.setText(
-                f"{APP_NAME} needs an update. Do you want to install updates now?")
+                f"{APP_NAME} needs an update. Do you want to install updates now?\n\nNOTE: This will open your browser for you to manually download the new version.")
             update = a.addButton("Yes", a.ButtonRole.AcceptRole)
             # Do the actual download. same as the subtle statusArea button
-            update.clicked.connect()
+            update.clicked.connect(self.autoupdate_checker.download_update)
             a.addButton("No", a.ButtonRole.RejectRole)
             a.exec()
         elif self.autoupdate_checker.get_update_available() is False:
@@ -742,7 +767,7 @@ color:#eee;
         self.settings_dialog.rejected.connect(self.after_settings_exit)
         self.settings_dialog.exec()
 
-    def lock_app(self):
+    def lock_app(self, optional_msg=""):
         self.editor.blockSignals(True)
         self.title_entry.blockSignals(True)
         self.notes_list_widget.clear()
@@ -756,6 +781,8 @@ color:#eee;
         self.lock = PasswordManager(
             db=self.db, settings_manager=self.settings_manager)
         # self.db = None
+        # self.lock.set_message(optional_msg)
+        # self.lock.set_message(optional_msg)
         self.lock.exec()
         if not self.lock.correct:
             self.master.exit(0)
@@ -786,6 +813,7 @@ color:#eee;
         self.db = DatabaseManager()
         self.refresh_notes_list()
         # self.refresh_actions_UI()
+        self.editor.setFocus()
         self.editor.blockSignals(False)
         self.title_entry.blockSignals(False)
         self.editor.blockSignals(False)
@@ -793,8 +821,21 @@ color:#eee;
 
     def after_settings_exit(self):
         """After we exit settings, this func will refresh the UI by checking all setting and applying those changes"""
-        self.refresh_actions_UI()
+        # self.refresh_actions_UI() XXX
         self.refresh_notes_list()
+
+        if not self.settings_manager.autolock_enabled:
+            self.inform_user(
+                "It is recommended to enable autolock if you tend to be forgetful.")
+            self.remind_user_autolock()
+            try:
+                self.master.removeEventFilter(self.autolock_event_listener)
+            except Exception as e:
+                print(e)
+
+        else:
+            if self.enableAutolock.isVisible():
+                self.enableAutolock.hide()
 
     def delete_current_note(self):
         if self.current_note_id is None:
@@ -813,7 +854,7 @@ color:#eee;
 
         self.current_note_id = None
 
-    def set_autolock_timer_interval(self):
+    def _set_autolock_timer_interval(self):
         """Autolock timer similar to autosave. It will be triggered everytime you make an action within the app. meaning, that any action you do while the app has focus, then this will be triggered and set for the interval minutes you set.
         """
         if not self.is_premium_user():
@@ -905,9 +946,53 @@ color:#eee;
 
         self.refresh_notes_list()
 
+        self.remind_user_protection()
+        self.remind_user_autolock()
+
+        self.select_note(self.current_note_id)
+
+        # zoom must be maintained
+        self.editor.setFontPointSize(self.main_text_size)
+
+        # print("autosaved")
+
+    def remind_user_autolock(self):
+        """Subtly remind a user when autosaving that they might leave the app open by mistake. Prompt them by placing a button that enables autolock right there; place that button on the statusArea.
+
+        This enables `autolock` setting. And they will be asked same way they would be asked in settings.
+        """
+        msg = f"Turn on Autolock just incase you leave your {APP_NAME} open by mistake."
+
+        # Remind user subtly about if his app is not set to autolock.
+        if (self.settings_manager.require_password and not self.settings_manager.autolock_enabled) and (self.settings_manager.warn_if_unprotected):
+
+            self.enableAutolock.show()
+            if self.times_reminded_about_autolock < 3:
+                self.inform_user(msg, "#FF2424")
+                self.times_reminded_about_autolock += 1
+            elif (self.times_reminded_about_autolock > 3) and (self.times_reminded_about_password_protection < 6):
+                self.inform_user(
+                    msg, "#656565")
+                self.times_reminded_about_autolock += 1
+            else:
+                # Leave the enable password button there.
+                # when they decide, they can enable it.
+                pass
+
+        if not self.settings_manager.require_password:
+            self.enableAutolock.hide()
+
+    def remind_user_protection(self):
+        """Subtly remind a user when autosaving that they are currently not password protected. Prompt them by placing a button that enables protection right there; place that button on the statusArea.
+
+        This enables require_password setting.
+        """
+
         # Remind user subtly about if his notes are not protected.
         if (not self.settings_manager.require_password) and (self.settings_manager.warn_if_unprotected):
             self.enablePassword.show()
+            # require_password being false implies autolock being false.
+            # require_password being true implies autolock being either true or false.
 
             if self.times_reminded_about_password_protection < 3:
                 self.inform_user(
@@ -921,13 +1006,6 @@ color:#eee;
                 # Leave the enable password button there.
                 # when they decide, they can enable it.
                 pass
-
-        self.select_note(self.current_note_id)
-
-        # zoom must be maintained
-        self.editor.setFontPointSize(self.main_text_size)
-
-        # print("autosaved")
 
     def zoom(self, type_):
         tmp = ""

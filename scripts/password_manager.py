@@ -197,6 +197,8 @@ class PasswordManager(QDialog):
         #     self.set_new = False
 
         # NOTE: This is required as the first sanity check.
+        
+
         self.init_ui()
 
     def pass_hash(self, password):
@@ -218,26 +220,36 @@ class PasswordManager(QDialog):
 
     def set_message(self, msg, color="#b50000"):
         """only show message when this func is called"""
-        self.status.show()
-        self.status.setText(msg)
+        if not msg.strip():
+            self.status.hide()
+            return
+
+        existing = self.status.text().strip()
+        if existing:
+            self.status.setText(f"{existing}\n{msg}")
+        else:
+            self.status.setText(f"{msg}")
         self.status.setStyleSheet(f"color:{color};")
+        self.status.show()
+
+        print(self.main_layout.children())
 
     def init_ui(self):
         self.setWindowTitle("Enter Password")
         self.setMaximumSize(700, 500)
         self.setMinimumSize(400, 300)
-        main_layout = QVBoxLayout()
+        self.main_layout = QVBoxLayout()
         form_layout = QFormLayout()
         self.new_password_input = QLineEdit()
         self.old_password_input = QLineEdit()
         self.confirm_password_input = QLineEdit()
         self.password_hint_input = QLineEdit()
-
+        self.status = QLabel()
         self.save_button = QPushButton("Ok")
 
-        self.status = QLabel()
-        self.status.setWordWrap(True)
+        
 
+        self.status.setWordWrap(True)
         if self.set_new:
             self.setWindowTitle("Set a New Password")
             self.new_password_input.setEchoMode(QLineEdit.Password)
@@ -251,6 +263,7 @@ class PasswordManager(QDialog):
                 "Password Hint:",
                 self.password_hint_input
             )
+
             if not self.turning_require_password_back_on:
                 self.save_button.clicked.connect(self.okay_new)
             else:
@@ -275,10 +288,7 @@ class PasswordManager(QDialog):
             self.save_button.clicked.connect(self.okay_new_change)
 
         else:
-            ps_hint = self.db.get_config("password_hint")
-            if ps_hint.strip():
-                self.set_message(
-                    f"{self.status.text()}\nPassword Hint: {ps_hint}".strip(), "#21ec21")
+            
             self.password_input = QLineEdit()
             self.password_input.setEchoMode(QLineEdit.Password)
             form_layout.addRow("Password:", self.password_input)
@@ -286,24 +296,31 @@ class PasswordManager(QDialog):
             self.new_password_input = None
             self.save_button.clicked.connect(self.okay)
 
+            ps_hint = self.db.get_config("password_hint")
+            if ps_hint.strip():
+                self.set_message(
+                    f"Password Hint: {ps_hint}".strip(), "#21ec21")
+
         self.cancel_button = QPushButton("Quit")
         self.cancel_button.clicked.connect(self.reject)
 
-        self.status.hide()
-        main_layout.addWidget(self.status)
-        main_layout.addLayout(form_layout)
-        main_layout.addWidget(self.save_button)
-        main_layout.addWidget(self.cancel_button)
+        # self.status.hide()
+        
+
+        self.main_layout.addLayout(form_layout)
+        self.main_layout.addWidget(self.save_button)
+        self.main_layout.addWidget(self.cancel_button)
 
         # main_layout.addStretch()
+        self.main_layout.insertWidget(0,self.status)
 
-        self.setLayout(main_layout)
+        self.setLayout(self.main_layout)
 
     def save_password_hint(self):
         self.settings_manager.password_hint = self.password_hint_input.text()
 
     def get_hashed(self):
-        """The last place to check is the DB itself"""
+        """Get the stored password hash from the db"""
         def search_db():
             # Attempt 3: get it from the db itself.
             db_stored_hash = str(self.db.get_config("password_hash"))
@@ -384,12 +401,17 @@ class PasswordManager(QDialog):
 
             self.crypto.unlock(new, new_salt, new_enc_DEK)
 
+        
+        if not self.validate_inputs():
+            return
+        
         old_pass = self.old_password_input.text()
         new_pass = self.new_password_input.text()
-        confirm_pass = self.confirm_password_input.text()
         pass_hint = self.password_hint_input.text()
 
+        confirm_pass = self.confirm_password_input.text()
         stored_hash = self.db.get_config("password_hash")
+
         if self.crypto.pass_hash(old_pass) != stored_hash:
             # incorrect old pass word.
             QMessageBox.critical(
@@ -398,15 +420,7 @@ class PasswordManager(QDialog):
                 "The current password is incorrect."
             )
             return
-        if new_pass != confirm_pass:
-            QMessageBox.warning(
-                self,
-                "Password Mismatch",
-                "The passwords do not match."
-            )
-            return
         try:
-
             save_changed(old_pass, new_pass)
             self.db.set_config("password_hint", pass_hint)
             QMessageBox.information(
@@ -441,16 +455,12 @@ class PasswordManager(QDialog):
 
         password = self.new_password_input.text()
 
-        if not (self.confirm_password_input.text() == self.new_password_input.text()):
-            QMessageBox.critical(
-                self,
-                "Password Mismatch",
-                "Confirm and new Password must match exactly")
+        if not self.validate_inputs():
             return
 
         QMessageBox.information(self, "Password Set", "Password Set")
-        self.correct = True
 
+        self.correct = True
         save_new(password)
         try:
             assert self.old_password_input is not None
@@ -468,9 +478,38 @@ class PasswordManager(QDialog):
 
     def okay_resetting_after_require_off(self):
         """This is for when turning back the require pass option back on...it will change from the default password to the new password"""
-        old, new = self.def_password, self.confirm_password_input.text()
-        self.save_changed(old, new)
-        self.accept()
+        if self.validate_inputs():
+            old, new = self.def_password, self.confirm_password_input.text()
+            self.save_changed(old, new)
+
+            # everytime, you must modify self.correct accordingly before the password setting window, disappears because it is used by app
+            self.correct=True
+            self.accept()
+        else:
+            self.correct = False
+
+    def validate_inputs(self):
+        """To be called in every OK call. we must make the user not press okay if """
+        if self.set_new:
+            if not (self.confirm_password_input.text() == self.new_password_input.text()):
+                QMessageBox.critical(
+                    self,
+                    "Password Mismatch",
+                    "Confirm and new Password must match exactly")
+                return
+        elif self.change_pass:
+            new_pass = self.new_password_input.text()
+            confirm_pass = self.confirm_password_input.text()
+            if new_pass != confirm_pass:
+                QMessageBox.warning(
+                    self,
+                    "Password Mismatch",
+                    "The passwords do not match."
+                )
+                return
+        
+        return True
+
 
     def unlock_DEK(self, password):
         encDEK = self.db.get_config("encDEK").encode()
@@ -483,7 +522,6 @@ class PasswordManager(QDialog):
 
     def okay(self):
         password = self.password_input.text().strip()
-
         # developed for when user wants to turn off require pass.
         self.password = password
         # How can we know if the DEK is valid
@@ -514,4 +552,5 @@ class PasswordManager(QDialog):
             return True
         else:
             self.correct = False
+            return False
             # tampered with default password or something else.

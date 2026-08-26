@@ -144,6 +144,21 @@ class SettingsDialog(QDialog):
             self.db, self.settings_manager, change=True)
         lock.exec()
 
+    def manage_autolock_setup(self):
+        self.autolock_mins = QInputDialog.getItem(
+            self, "Autolock After", "Autolock After __ Minutes", ["3", "5", "10", "30", "50"], 1, False)
+
+        # TODO: We can premiumize this editableness too
+        # To allow them to set any time they want.
+
+        if self.autolock_mins is not None:
+            self.settings_manager.autolock_minutes = self.autolock_mins[0]
+        else:
+            # default is 5 mins
+            self.settings_manager.autolock_minutes = 5
+
+        self.settings_manager.autolock_enabled = True
+
     def manage_pass_request_at_startup(self):
         self.lock = self.password_manager(self.db, self.settings_manager)
         self.stored_pass_hash = self.lock.get_hashed()
@@ -156,7 +171,6 @@ class SettingsDialog(QDialog):
                 self.db, self.settings_manager)
             self.lock.exec()
             if not self.lock.correct:
-                # keep it locked, they must remember their password.
                 self.require_password.setChecked(True)
                 self.settings_manager.require_password = True
                 return
@@ -172,6 +186,9 @@ class SettingsDialog(QDialog):
             lock = self.password_manager(
                 self.db, self.settings_manager, new=True, new_change=True)
             lock.exec()
+            if not lock.correct:
+                # user probably cancelled or some error
+                self.settings_manager.require_password = False
             return
 
     def set_setting(self, widget: QPushButton | QCheckBox):
@@ -200,28 +217,19 @@ class SettingsDialog(QDialog):
                         self.autolock_app.setChecked(False)
                         self.parent_app.prompt_buy()
                         return
+                    
+                    self.manage_autolock_setup()
+                    # self.settings_manager.autolock_enabled = True
 
-                    self.settings_manager.autolock_enabled = True
                     if self.settings_manager.is_first_run:
                         QMessageBox.information(
                             self, "Autolock Enabled", "When you don't engage with the app for a while, It will lock automatically.")
-
-                    self.autolock_mins = QInputDialog.getItem(
-                        self, "Autolock After", "Autolock After __ Minutes", ["3", "5", "10", "30", "50"], 1, False)
-
-                    # TODO: We can premiumize this editableness too
-                    # To allow them to set any time they want.
-
-                    if self.autolock_mins is not None:
-                        self.settings_manager.autolock_minutes = self.autolock_mins[0]
-                    else:
-                        # default is 5 mins
-                        self.settings_manager.autolock_minutes = 5
-
+                        
                 else:
                     self.settings_manager.autolock_enabled = False
                     QMessageBox.warning(
                         self, "Autolock Disabled", "Autolock Disabled. Just ensure you exit the app or lock the app manually before you leave.")
+
             elif "warn" in obj_name:
                 self.settings_manager.warn_if_unprotected = self.warn_unprotected.isChecked()
 

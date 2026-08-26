@@ -6,7 +6,7 @@ When you want to back up your notes, you can follow these simple steps:
 
 2. Go to the `roaming` folder in `appdata` of your computer.
 
-    - can't find the roaming folder? Just press Windows + R and type `appdata`. Then press enter. 
+    - can't find the roaming folder? Just press Windows + R and type `appdata`. Then press enter.
     ![alt text](./imgs/image.png)
 
     - This will open the appdata folder which you can enter the `Roaming` folder from.
