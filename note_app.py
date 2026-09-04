@@ -10,7 +10,7 @@ from scripts.license_manager import LicenseManager
 import sys
 
 # import markdown
-from scripts.constants import APP_PHOTO, MAX_REMINDER_ABOUT_UPGRADE, MAX_NOTE_AMOUNT, APP_NAME, NOTES_DB
+from scripts.constants import APP_PHOTO, APP_VERSION, MAX_REMINDER_ABOUT_UPGRADE, MAX_NOTE_AMOUNT, APP_NAME, NOTES_DB
 
 from scripts.password_manager import PasswordManager
 
@@ -85,8 +85,6 @@ class NoteApp(QMainWindow):
         self.update_is_available = False
 
         self.current_note_id = None
-        c_title = ""
-        c_content = ""
         self.is_read_mode = False
         self.notes = []
 
@@ -444,7 +442,7 @@ Instead, lock all your notes in {APP_NAME}.""")
         print("you should restart")
 
     def init_ui(self):
-        self.setWindowTitle("Thought Book")
+        self.setWindowTitle(f"{APP_NAME} {APP_VERSION}")
         self.resize(1200, 600)
 
         # ===========================

@@ -10,8 +10,7 @@ from pathlib import Path
 __all__ = [
     "NOTES_DB", "NOTES_FOLDER",
     "RECOVERY_FILE", "PASS_FILE",
-    "DATA_FOLDER", "LOGS_FILE",
-    "BMA_DOWNLOAD_LINK", "APP_NAME",
+    "DATA_FOLDER", "LOGS_FILE", "APP_NAME",
     "APP_VERSION", "APP_ICON", "APP_PHOTO"
 ]
 

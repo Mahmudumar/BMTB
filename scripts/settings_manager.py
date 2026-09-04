@@ -228,7 +228,7 @@ class SettingsDialog(QDialog):
                 else:
                     self.settings_manager.autolock_enabled = False
                     QMessageBox.warning(
-                        self, "Autolock Disabled", "Autolock Disabled. Just ensure you exit the app or lock the app manually before you leave.")
+                        self, "Autolock Disabled", "Autolock Disabled. Just ensure you exit the app or lock the app manually.")
 
             elif "warn" in obj_name:
                 self.settings_manager.warn_if_unprotected = self.warn_unprotected.isChecked()
