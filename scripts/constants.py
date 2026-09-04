@@ -34,7 +34,7 @@ APP_NAME = "Thought Book"
 # for now, manually change
 # the version to match the
 # update.json and the deploy.
-APP_VERSION = "2.1.0"
+APP_VERSION = "2.0.0"
 APP_SHORT_NAME = "BMTB"
 
 
@@ -190,12 +190,11 @@ UPDATE_DOWNLOAD_FOLDER = Path(os.path.join(
 
 
 # --- External Links ---
-BMA_DOWNLOAD_LINK = "https://github.com/Mahmudumar/BMA/releases/latest"
-BMTB_DOWNLOAD_LINK = "https://github.com/tech-naija-rise/BMTB/releases/latest"
-BMTB_DOWNLOAD_LINK2 = "https://tech-naija-rise.github.io/BMTB_webpage/"
 
-BMTB_FEEDBACK_SERVER = "https://feedback-server-tnr.onrender.com/feedback"
 TNR_BMTB_SERVER = "https://feedback-server-tnr.onrender.com"
+# Endpoints
+TNR_BMTB_WEBPAGE = f"{TNR_BMTB_SERVER}/bmtb_webpage"
+BMTB_FEEDBACK_SERVER = f"{TNR_BMTB_SERVER}/feedback"
 # TNR_BMTB_SERVER_TEST = "http://localhost:5555"
 
 

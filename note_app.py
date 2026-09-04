@@ -4,7 +4,7 @@ import threading
 
 from PyQt5 import QtCore
 from PyQt5.QtCore import QObject, QEvent, QTimer, pyqtSignal, pyqtSlot
-from scripts.auto_updater import AutoUpdater
+from scripts.auto_updater import AutoUpdater, ProgressDialog
 from scripts.database_manager import DatabaseManager
 from scripts.license_manager import LicenseManager
 import sys
@@ -31,6 +31,7 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QMenuBar, QStatusBar, QT
 from scripts.premium_manager import PremiumTracker
 from scripts.settings_manager import Settings, SettingsDialog
 from scripts.threading import Signals
+
 
 class ActivityMonitor(QObject):
     def __init__(self, autolock_timer: QTimer, parent=None):
@@ -70,17 +71,17 @@ class OnBoardingTracker(QObject):
         return False
 
 
-
 class NoteApp(QMainWindow):
+
     def __init__(self, parent: QApplication):
         super().__init__()
         self.master = parent
-        self.signals = Signals()
 
         self.db = DatabaseManager()
         self.settings_manager = Settings(self.db)
         self.premium_tracker = PremiumTracker(self)
         self.autoupdate_checker = AutoUpdater(self)
+
         self.update_is_available = False
 
         self.current_note_id = None
@@ -160,10 +161,7 @@ QListWidget{
         self.autolock_event_listener = ActivityMonitor(
             self.autolock_timer, parent=self)
 
-        # Autolock Timer
-        if self.settings_manager.autolock_enabled:
-            if self.is_premium_user():
-                self.install_autolock_timer()
+        self.start_autolock_engine()
 
         hashes_tampered = [
             False
@@ -189,9 +187,24 @@ QListWidget{
             "congrats"
         ]
 
+        # ==================AUTO-UPDATE-CHECK================
         # We want to check if there are any updates, then we prompt
+        self.silent_update_signal = Signals()
+        self.loud_update_signal = Signals()
+        self.download_update_signal = Signals()
+
+        self.loud_update_signal.finished.connect(self.loud_update_notify)
+        self.loud_update_signal.progress.connect(
+            lambda: print("Obvi Checking update"))
+
+        self.silent_update_signal.finished.connect(self.silent_update_notify)
+        self.silent_update_signal.progress.connect(
+            lambda: print("Silently Checking update"))
+
+        self.download_update_widget = ProgressDialog(
+            self.download_update_signal)
+
         self.background_update_check()
-        
 
         if self.settings_manager.onbrd_stps_completed >= len(self.onboarding_steps):
             self.settings_manager.is_first_run = False
@@ -367,7 +380,7 @@ Instead, lock all your notes in {APP_NAME}.""")
             a = QMessageBox(self)
             a.setWindowTitle("Well Done and Welcome")
             a.setText(
-                f"Welcome to {APP_NAME}! It is a more private alternative to notepad for avid note-takers like you.")
+                f"Welcome to {APP_NAME}!")
             a.setIcon(a.Icon.Information)
             a.addButton("Start Writing", a.ButtonRole.AcceptRole)
             a.exec()
@@ -383,7 +396,7 @@ Instead, lock all your notes in {APP_NAME}.""")
             a = QMessageBox(self)
             a.setWindowTitle(f"Support {APP_NAME}")
             a.setText(
-                f"Before you go on, consider supporting the cause of creating more offline-friendly and private software for people with unreliable internet and people who don't like how AI is integrated into everything.")
+                f"Before you go on, consider supporting the cause of creating more offline-friendly and private software for people with unreliable internet and people who want privacy.")
             a.setIcon(a.Icon.Information)
             support = a.addButton(
                 f"Support {APP_NAME}", a.ButtonRole.YesRole)
@@ -626,7 +639,7 @@ color:#eee;
             lambda: self.obvi_update_check())
 
         self.update_btn = QPushButton("Update Now")
-        # self.update_btn.clicked.connect()
+        self.update_btn.clicked.connect(self.download_update)
         self.update_btn.hide()
         self.statusArea.addPermanentWidget(self.update_btn)
 
@@ -655,7 +668,7 @@ color:#eee;
 
             self.settings_dialog.manage_autolock_setup()
             if self.settings_manager.autolock_enabled:
-                self.install_autolock_timer()
+                self._install_autolock_timer()
 
             self.inform_user(
                 f"After {self.settings_manager.autolock_minutes} minutes of inactivity, your {APP_NAME} will automatically lock.")
@@ -672,27 +685,60 @@ color:#eee;
         self.statusArea.addPermanentWidget(self.enablePassword)
         self.statusArea.addPermanentWidget(self.enableAutolock)
 
-    def install_autolock_timer(self):
+    def start_autolock_engine(self):
+        # Autolock Timer
+        if self.settings_manager.autolock_enabled:
+            if self.is_premium_user():
+                self._install_autolock_timer()
+
+    def _install_autolock_timer(self):
         """Instantiate the autolock timer: This is for when autolock is turned on, everytime the setting is true, whether from settings or from reading from the reg, then this is what instantiates the timer, so that the user doesn't have to restart the app for timer to take effect"""
         self.autolock_timer.timeout.connect(self.lock_app)
         self._set_autolock_timer_interval()
         self.master.installEventFilter(self.autolock_event_listener)
 
+    def loader(self, percent: int):
+        self.download_update_widget.update_progress(percent,
+                                                    f"Updating {APP_NAME}...")
+        self.master.processEvents()
+
+    def clean_up_cancelled_download(self):
+        self.download_update_widget.close()
+        self.autoupdate_checker.cleanup_cancelled_download()
+        self.inform_user("Update Cancelled")
+
+    def download_update(self):
+        """What to do when the user hits the update app btn"""
+
+        self.download_update_signal.finished.connect(self.launch_installer)
+        self.download_update_signal.update_percent.connect(
+            lambda e: self.loader(e))
+        self.download_update_signal.update_cancelled.connect(
+            self.clean_up_cancelled_download)
+
+        download_thread = threading.Thread(target=self.autoupdate_checker.download_update, args=(
+            self.download_update_signal,), daemon=True, name="download_thread")
+
+        download_thread.start()
+        self.download_update_widget.exec()
+
+    def launch_installer(self):
+        print("Launching installer")
+        self.autoupdate_checker.launch_installer()
+
     def background_update_check(self):
         """Silently Give notification for the availability"""
         # Assume everything is silent.
-        self.signals.finished.connect(self.silent_update_notify)
-        self.signals.progress.connect(lambda: print("Checking update"))
+
         silent_update_checker = threading.Thread(
-            target=self.autoupdate_checker._check, name="background_check_thread", args=(self.signals,), daemon=True)
+            target=self.autoupdate_checker._check, name="background_check_thread", args=(self.silent_update_signal,), daemon=True)
         silent_update_checker.start()
 
     def obvi_update_check(self):
         """Give notification for the availability"""
-        self.signals.finished.connect(self.loud_update_notify)
-        self.signals.progress.connect(lambda: print("Checking update"))
+        self.inform_user("Checking for updates now...")
         loud_update_checker = threading.Thread(
-            target=self.autoupdate_checker._check, args=(self.signals,), name="obvious_check_thread", daemon=True)
+            target=self.autoupdate_checker._check, args=(self.loud_update_signal,), name="obvious_check_thread", daemon=True)
         loud_update_checker.start()
 
     def silent_update_notify(self):
@@ -701,7 +747,7 @@ color:#eee;
                 f"Update available. Your {APP_NAME} needs an update to stay secure.")
             self.update_btn.show()
         elif self.autoupdate_checker.get_update_available() is False:
-            self.inform_user("No update available yet")
+            # self.inform_user("No update available yet")
             self.update_btn.hide()
         elif self.autoupdate_checker.get_update_available() is None:
             # silently fail.
@@ -715,10 +761,10 @@ color:#eee;
             a.setIcon(a.Icon.Information)
             a.setWindowTitle(f"{APP_NAME} update is available")
             a.setText(
-                f"{APP_NAME} needs an update. Do you want to install updates now?\n\nNOTE: This will open your browser for you to manually download the new version.")
+                f"{APP_NAME} needs an update. Do you want to install updates now?\n\n")
             update = a.addButton("Yes", a.ButtonRole.AcceptRole)
             # Do the actual download. same as the subtle statusArea button
-            update.clicked.connect(self.autoupdate_checker.download_update)
+            update.clicked.connect(self.download_update)
             a.addButton("No", a.ButtonRole.RejectRole)
             a.exec()
         elif self.autoupdate_checker.get_update_available() is False:
@@ -736,6 +782,26 @@ color:#eee;
     def open_donation_box(self):
         # What is the ruling on asking for donations
         pass
+
+    def ask_question(self, title, message, type_="info"):
+        """Usage: 
+
+        question = ask_question(title, message)
+        question.addButton("yes", ...)
+        question.exec()
+
+        returns: the QMessageBox() object"""
+        a = QMessageBox()
+        if "info" in type_:
+            a.setIcon(a.Icon.Information)
+        elif "warn" in type_:
+            a.setIcon(a.Icon.Warning)
+        elif "criti" in type_ or "err" in type_:
+            a.setIcon(a.Icon.Critical)
+
+        a.setWindowTitle(f"{title}")
+        a.setText(f"{message}")
+        return a
 
     def prompt_buy(self, feature_name="this feature"):
         a = QMessageBox()
@@ -770,6 +836,7 @@ color:#eee;
     def lock_app(self, optional_msg=""):
         self.editor.blockSignals(True)
         self.title_entry.blockSignals(True)
+        self.autolock_timer.blockSignals(True)
         self.notes_list_widget.clear()
         self.editor.clear()
         self.title_entry.clear()
@@ -816,8 +883,8 @@ color:#eee;
         self.editor.setFocus()
         self.editor.blockSignals(False)
         self.title_entry.blockSignals(False)
-        self.editor.blockSignals(False)
-        self.title_entry.blockSignals(False)
+        self.autolock_timer.blockSignals(False)
+
 
     def after_settings_exit(self):
         """After we exit settings, this func will refresh the UI by checking all setting and applying those changes"""
@@ -836,6 +903,8 @@ color:#eee;
         else:
             if self.enableAutolock.isVisible():
                 self.enableAutolock.hide()
+            # Do the actual enabling of the autolock
+            self.start_autolock_engine()
 
     def delete_current_note(self):
         if self.current_note_id is None:
@@ -1162,8 +1231,24 @@ color:#eee;
         except Exception as e:
             return 0
 
+    def confirm_exit_without_protection(self):
+        """Always check when exiting, whether protection is on or not, warn the user to turn on protection if warn if not protected setting is on else, just exit like that."""
+        # If warn_if_not_protected is on then check
+        
+        if self.settings_manager.warn_if_unprotected:
+            print("about to warn", self.settings_manager.require_password)
+            if not self.settings_manager.require_password:
+                print("Hey")
+                # self.inform_user(
+                #     f"Warning: Anyone can access your notes, the next time you open your {APP_NAME}")
+                self.ask_question(
+                    "Warning: Not Password Protected",
+                    f"Warning: Anyone can access your notes, the next time {APP_NAME} is opened.\n\nAre you sure you want to exit without protection?")
+                
+
     def abouttoquit(self):
         """What to do when user is leaving"""
+        self.confirm_exit_without_protection()
         print("bye")
 
 
@@ -1171,8 +1256,8 @@ def main():
     app = QApplication(sys.argv)
     app.setWindowIcon(QIcon(str(APP_PHOTO)))
     window = NoteApp(app)
-    window.setWindowIcon(QIcon(str(APP_PHOTO)))
     app.aboutToQuit.connect(window.abouttoquit)
+    window.setWindowIcon(QIcon(str(APP_PHOTO)))
     sys.exit(app.exec_())
 
 
