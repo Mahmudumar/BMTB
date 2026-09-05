@@ -150,7 +150,7 @@ class AutoUpdater:
             logging.info(f"Launching installer: {self.installer_path}")
 
             subprocess.Popen(
-                [str(self.installer_path), "/S"],
+                [str(self.installer_path)],
                 close_fds=True
             )
             self.parent.close()
@@ -184,8 +184,8 @@ class AutoUpdater:
 
 
 class ProgressDialog(QDialog):
-    def __init__(self, signal: Signals):
-        super().__init__()
+    def __init__(self, signal: Signals, parent=None):
+        super().__init__(parent=parent)
 
         self.setWindowTitle("Processing")
         self.setFixedSize(350, 160)

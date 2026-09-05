@@ -200,7 +200,7 @@ QListWidget{
             lambda: print("Silently Checking update"))
 
         self.download_update_widget = ProgressDialog(
-            self.download_update_signal)
+            self.download_update_signal, parent=self)
 
         self.background_update_check()
 
@@ -390,17 +390,17 @@ Instead, lock all your notes in {APP_NAME}.""")
             self.title_entry.blockSignals(False)
             self.editor.blockSignals(False)
             self.editor.setPlaceholderText("Think...")
-
-            a = QMessageBox(self)
-            a.setWindowTitle(f"Support {APP_NAME}")
-            a.setText(
-                f"Before you go on, consider supporting the cause of creating more offline-friendly and private software for people with unreliable internet and people who want privacy.")
-            a.setIcon(a.Icon.Information)
-            support = a.addButton(
-                f"Support {APP_NAME}", a.ButtonRole.YesRole)
-            support.clicked.connect(self.open_license_buy)
-            a.addButton("Skip", a.ButtonRole.NoRole)
-            a.exec()
+            if not self.is_premium_user():
+                a = QMessageBox(self)
+                a.setWindowTitle(f"Support {APP_NAME}")
+                a.setText(
+                    f"Before you go on, consider supporting the cause of creating more offline-friendly and private software for people with unreliable internet and people who want privacy.")
+                a.setIcon(a.Icon.Information)
+                support = a.addButton(
+                    f"Support {APP_NAME}", a.ButtonRole.YesRole)
+                support.clicked.connect(self.open_license_buy)
+                a.addButton("Skip", a.ButtonRole.NoRole)
+                a.exec()
 
             self.settings_manager.onbrd_stps_completed += 1
 
@@ -688,7 +688,7 @@ color:#eee;
         if self.settings_manager.autolock_enabled:
             if self.is_premium_user():
                 self._install_autolock_timer()
-
+    
     def _install_autolock_timer(self):
         """Instantiate the autolock timer: This is for when autolock is turned on, everytime the setting is true, whether from settings or from reading from the reg, then this is what instantiates the timer, so that the user doesn't have to restart the app for timer to take effect"""
         self.autolock_timer.timeout.connect(self.lock_app)
@@ -770,7 +770,7 @@ color:#eee;
                                         f"{APP_NAME} is Up to date.")
         else:
             QMessageBox.critical(
-                None, "Something happened", f"Update checking encountered a problem, might be from our server or a connection problem. Try checking for updates later.")
+                None, "Something happened", f"Update checking encountered a problem, might be from our server or an internet connection problem. Try checking for updates later.")
 
     def open_license_buy(self):
         """Manage Licenser"""
