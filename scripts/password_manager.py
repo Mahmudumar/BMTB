@@ -3,6 +3,7 @@ import os
 import string
 from scripts.constants import PASS_FILE, APP_PHOTO
 from scripts.database_manager import DatabaseManager
+from scripts.password_hint import load_password_hint, save_password_hint
 
 from PyQt5.QtGui import QIcon
 
@@ -300,10 +301,9 @@ class PasswordManager(QDialog):
             self.new_password_input = None
             self.save_button.clicked.connect(self.okay)
 
-            ps_hint = self.db.get_config("password_hint")
-            if ps_hint.strip():
-                self.set_message(
-                    f"Password Hint: {ps_hint}".strip(), "#21ec21")
+            ps_hint = load_password_hint(self.db, self.settings_manager)
+            if ps_hint:
+                self.set_message(f"Password Hint: {ps_hint}", "#21ec21")
 
         self.cancel_button = QPushButton("Quit")
         self.cancel_button.clicked.connect(self.reject)
@@ -321,7 +321,10 @@ class PasswordManager(QDialog):
         self.setLayout(self.main_layout)
 
     def save_password_hint(self):
-        self.settings_manager.password_hint = self.password_hint_input.text()
+        """Persist an explicitly entered hint without replacing it with an empty value."""
+        return save_password_hint(
+            self.db, self.settings_manager, self.password_hint_input.text()
+        )
 
     def get_hashed(self):
         """Get the stored password hash from the db"""
@@ -426,7 +429,8 @@ class PasswordManager(QDialog):
             return
         try:
             save_changed(old_pass, new_pass)
-            self.db.set_config("password_hint", pass_hint)
+            if pass_hint.strip():
+                save_password_hint(self.db, self.settings_manager, pass_hint)
             QMessageBox.information(
                 self,
                 "Success",
