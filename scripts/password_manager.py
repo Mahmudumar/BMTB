@@ -244,6 +244,10 @@ class PasswordManager(QDialog):
         self.old_password_input = QLineEdit()
         self.confirm_password_input = QLineEdit()
         self.password_hint_input = QLineEdit()
+        self.password_hint_input.setPlaceholderText("Optional reminder, not your password")
+        self.password_hint_input.setToolTip(
+            "Optional. Write a clue that helps you remember without revealing the password."
+        )
         self.status = QLabel()
         self.save_button = QPushButton("Ok")
 
@@ -462,6 +466,7 @@ class PasswordManager(QDialog):
 
         self.correct = True
         save_new(password)
+        self.save_password_hint()
         try:
             assert self.old_password_input is not None
             self.old_password_input.clear()
