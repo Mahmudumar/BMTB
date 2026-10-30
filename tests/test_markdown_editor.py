@@ -40,3 +40,13 @@ def test_position_mapping_is_identity_in_plain_text_mode():
     for position in positions:
         assert PlainTextMarkdownAdapter.source_to_editor_position(position) == position
         assert PlainTextMarkdownAdapter.editor_to_source_position(position) == position
+
+
+def test_adapter_preserves_leading_and_trailing_whitespace():
+    editor = FakeTextEdit()
+    adapter = PlainTextMarkdownAdapter(editor)
+    source = "  **goat**  \\n"
+
+    adapter.load_source(source)
+
+    assert adapter.read_source() == source
