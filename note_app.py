@@ -875,7 +875,7 @@ color:#eee;
         self.editor.setFontPointSize(self.main_text_size)
 
         # ensure there's something before saving.
-        if c_content:
+        if c_content.strip():
             c_content = self.encrypt(
                 self.lock.crypto.dek, c_content)
 
