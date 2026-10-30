@@ -3,6 +3,7 @@ import os
 import string
 from scripts.constants import PASS_FILE, APP_PHOTO
 from scripts.database_manager import DatabaseManager
+from scripts.password_hint import load_password_hint, save_password_hint
 
 from PyQt5.QtGui import QIcon
 
@@ -232,7 +233,6 @@ class PasswordManager(QDialog):
         self.status.setStyleSheet(f"color:{color};")
         self.status.show()
 
-        print(self.main_layout.children())
 
     def init_ui(self):
         self.setWindowTitle("Enter Password")
@@ -244,6 +244,10 @@ class PasswordManager(QDialog):
         self.old_password_input = QLineEdit()
         self.confirm_password_input = QLineEdit()
         self.password_hint_input = QLineEdit()
+        self.password_hint_input.setPlaceholderText("Optional reminder, not your password")
+        self.password_hint_input.setToolTip(
+            "Optional. Write a clue that helps you remember without revealing the password."
+        )
         self.status = QLabel()
         self.save_button = QPushButton("Ok")
 
@@ -296,10 +300,9 @@ class PasswordManager(QDialog):
             self.new_password_input = None
             self.save_button.clicked.connect(self.okay)
 
-            ps_hint = self.db.get_config("password_hint")
-            if ps_hint.strip():
-                self.set_message(
-                    f"Password Hint: {ps_hint}".strip(), "#21ec21")
+            ps_hint = load_password_hint(self.db, self.settings_manager)
+            if ps_hint:
+                self.set_message(f"Password Hint: {ps_hint}", "#21ec21")
 
         self.cancel_button = QPushButton("Quit")
         self.cancel_button.clicked.connect(self.reject)
@@ -317,7 +320,10 @@ class PasswordManager(QDialog):
         self.setLayout(self.main_layout)
 
     def save_password_hint(self):
-        self.settings_manager.password_hint = self.password_hint_input.text()
+        """Persist an explicitly entered hint without replacing it with an empty value."""
+        return save_password_hint(
+            self.db, self.settings_manager, self.password_hint_input.text()
+        )
 
     def get_hashed(self):
         """Get the stored password hash from the db"""
@@ -422,7 +428,8 @@ class PasswordManager(QDialog):
             return
         try:
             save_changed(old_pass, new_pass)
-            self.db.set_config("password_hint", pass_hint)
+            if pass_hint.strip():
+                save_password_hint(self.db, self.settings_manager, pass_hint)
             QMessageBox.information(
                 self,
                 "Success",
@@ -462,6 +469,7 @@ class PasswordManager(QDialog):
 
         self.correct = True
         save_new(password)
+        self.save_password_hint()
         try:
             assert self.old_password_input is not None
             self.old_password_input.clear()
@@ -481,9 +489,10 @@ class PasswordManager(QDialog):
         if self.validate_inputs():
             old, new = self.def_password, self.confirm_password_input.text()
             self.save_changed(old, new)
+            self.save_password_hint()
 
-            # everytime, you must modify self.correct accordingly before the password setting window, disappears because it is used by app
-            self.correct=True
+            # The hint is optional; a blank field leaves any saved hint unchanged.
+            self.correct = True
             self.accept()
         else:
             self.correct = False

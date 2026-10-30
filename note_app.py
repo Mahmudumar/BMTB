@@ -26,7 +26,7 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QMenuBar, QStatusBar, QT
                              QHBoxLayout,
                              QVBoxLayout,
                              QMessageBox,
-                             QLineEdit)
+                             QLineEdit, QSplitter, QSizePolicy)
 
 from scripts.premium_manager import PremiumTracker
 from scripts.settings_manager import Settings, SettingsDialog
@@ -227,182 +227,36 @@ QListWidget{
                             "Some settings are being tampered with. Please enter your set password.")
 
     def begin_onboarding(self, next_step="set_password"):
-        """This is recursive in nature. parts of it will call back at the function itself.
+        """Run the short first-run setup without changing vault security behavior."""
+        if not self.settings_manager.is_first_run:
+            return
 
-        After every if or elif or else block, ensure you call this function with the step you want the user to go to.
+        self.settings_manager.require_password = True
+        self.lock = PasswordManager(
+            db=self.db,
+            settings_manager=self.settings_manager,
+            new=True,
+            parent=self,
+        )
+        self.lock.set_message(
+            f"Welcome to {APP_NAME}. Choose a memorable but hard-to-guess password. "
+            "The hint is optional; use a reminder that does not reveal your password. "
+            "Your password encrypts your notes. If you forget it, the notes cannot "
+            "be recovered; the only reset is deleting the local notes vault.",
+            "#19d819",
+        )
+        self.lock.password_hint_input.setToolTip(
+            "Optional reminder. Do not put the password itself in the hint."
+        )
+        self.lock.exec()
 
-        """
-        # "set_password",
-        # "set_password_hint",
-        # "create_one_note",
-        # "write",
-        # "manually_lock",
-        # "unlock",
-        # "congrats"
-        # Onboarding process
+        if not self.lock.correct:
+            sys.exit(0)
+            return
 
-        if self.settings_manager.onbrd_stps_completed > len(self.onboarding_steps):
-            self.settings_manager.is_first_run = False
-
-        print(next_step)
-        if "set_password" == next_step:
-            # NOTE: Must add 'and' logic
-            # XXX: Hackable area:
-
-            if (self.settings_manager.is_first_run):
-                self.settings_manager.require_password = True
-                self.lock = PasswordManager(
-                    db=self.db, settings_manager=self.settings_manager, new=True)
-                self.lock.set_message(f"""\
-Welcome to {APP_NAME}
-
-Please set an easy but hard to guess password.
-And a hint to help you remember.
-
-Your Password will be used to encrypt all your notes.
-""", "#19d819")
-
-            self.lock.exec()
-            # TODO: also secretly check if there's already a notes db.
-            # already.
-            if not self.lock.correct:
-                sys.exit(0)
-                return
-            self.settings_manager.onbrd_stps_completed = 1
-            self.begin_onboarding("set_password_hint")
-
-        elif "set_password_hint" == next_step:
-            a = QMessageBox(self)
-            a.setWindowTitle("I must remember my Password")
-            a.setText(
-                "Ensure you remember your password and hint, once you forget them, the only way to reset it is to delete all your notes.")
-            a.setIcon(a.Icon.Warning)
-            go_back = a.addButton("Go back", a.ButtonRole.NoRole)
-            go_back.clicked.connect(
-                lambda: self.begin_onboarding("set_password"))
-            a.addButton("Next", a.ButtonRole.AcceptRole)
-            a.exec()
-
-            self.settings_manager.onbrd_stps_completed += 1
-            self.begin_onboarding("create_one_note")
-
-        elif "create_one_note" == next_step:
-            a = QMessageBox(self)
-            a.setWindowTitle("Encrypted and AutoSaved")
-            a.setText("All your notes are saved in one secure place.")
-            a.setIcon(a.Icon.Information)
-            a.addButton("Start Writing", a.ButtonRole.AcceptRole)
-            a.exec()
-
-            self.settings_manager.onbrd_stps_completed += 1
-            self.begin_onboarding("write")
-            pass
-
-        elif "write" == next_step:
-            # self.editor.blockSignals(True)
-            self.title_entry.blockSignals(True)
-            self.title_entry.setText("First Note to Self")
-            self.editor.setPlaceholderText(
-                "Don't fear the blank page... Start with 'Hello' or something controversial. LOL.")
-            self.editor.setFocus()
-
-            timer = QTimer(self)
-            timer.setInterval(3_000)
-            tracker = OnBoardingTracker(timer, parent=self)
-            self.master.installEventFilter(tracker)
-
-            def to_next():
-                a = QMessageBox(self)
-
-                boost = ""
-                a.setWindowTitle(
-                    f"Nice But Don't Expose Yourself")
-                if tracker.keys_pressed > 20:
-                    boost = "Nice. That's what I call a piece of art.\n"
-
-                a.setText(f"""\
-{boost}
-When you want to write sensitive notes, don't use notepad.
-
-Instead, lock all your notes in {APP_NAME}.""")
-
-                a.setIcon(a.Icon.Information)
-                lock = a.addButton("Secure Your Notes",
-                                   a.ButtonRole.AcceptRole)
-                a.exec()
-
-                timer.stop()
-                self.master.removeEventFilter(tracker)
-                self.settings_manager.onbrd_stps_completed += 1
-                self.begin_onboarding("manually_lock")
-
-            timer.timeout.connect(to_next)
-
-            # wait for user to start writing. When they start and we have move on after celebrating them.
-
-        elif "manually_lock" == next_step:
-            col = "#9b0d0d"
-            self.lock_app_btn.setStyleSheet("""QPushButton{
-            background:#9b0d0d;} QPushButton{ background:#ac1e1e;}""")
-            self.lock_app_btn.clicked.disconnect()
-
-            def onboard_lock():
-                self.editor.blockSignals(True)
-                self.title_entry.blockSignals(True)
-                self.notes_list_widget.clear()
-                self.editor.clear()
-                self.title_entry.clear()
-
-                self.current_note_id = None
-                lock = PasswordManager(
-                    self.db, self.settings_manager, parent=self)
-                lock.set_message(
-                    f"Now enter your set password to unlock your {APP_NAME}.", "#14b324")
-                lock.exec()
-                if not lock.correct:
-                    sys.exit(0)
-                    return
-                self.settings_manager.onbrd_stps_completed += 1
-                self.begin_onboarding("unlock")
-
-            self.lock_app_btn.clicked.connect(lambda: onboard_lock())
-
-        elif "unlock" == next_step:
-            self.title_entry.blockSignals(False)
-            self.editor.blockSignals(False)
-            self.lock_app_btn.clicked.disconnect()
-            self.lock_app_btn.setStyleSheet("")
-            self.lock_app_btn.clicked.connect(self.lock_app)
-            self.refresh_notes_list()
-
-            a = QMessageBox(self)
-            a.setWindowTitle("Well Done and Welcome")
-            a.setText(
-                f"Welcome to {APP_NAME}!")
-            a.setIcon(a.Icon.Information)
-            a.addButton("Start Writing", a.ButtonRole.AcceptRole)
-            a.exec()
-
-            self.settings_manager.onbrd_stps_completed += 1
-            self.begin_onboarding("congrat")
-
-        elif "congrat" == next_step:
-            self.title_entry.blockSignals(False)
-            self.editor.blockSignals(False)
-            self.editor.setPlaceholderText("Think...")
-            if not self.is_premium_user():
-                a = QMessageBox(self)
-                a.setWindowTitle(f"Support {APP_NAME}")
-                a.setText(
-                    f"Before you go on, consider supporting the cause of creating more offline-friendly and private software for people with unreliable internet and people who want privacy.")
-                a.setIcon(a.Icon.Information)
-                support = a.addButton(
-                    f"Support {APP_NAME}", a.ButtonRole.YesRole)
-                support.clicked.connect(self.open_license_buy)
-                a.addButton("Skip", a.ButtonRole.NoRole)
-                a.exec()
-
-            self.settings_manager.onbrd_stps_completed += 1
+        self.settings_manager.onbrd_stps_completed = len(self.onboarding_steps)
+        self.settings_manager.is_first_run = False
+        self.refresh_notes_list()
 
     def get_all_notes_with_contents(self):
         """for search"""
@@ -464,8 +318,15 @@ Instead, lock all your notes in {APP_NAME}.""")
         sidebar_layout.setContentsMargins(0, 0, 0, 0)
         sidebar_layout.setSpacing(0)
 
+        self.notes_toggle_btn = QPushButton("☰")
+        self.notes_toggle_btn.setToolTip("Hide or show the notes list")
+        self.notes_toggle_btn.clicked.connect(self.toggle_notes_sidebar)
+        sidebar_layout.addWidget(self.notes_toggle_btn)
+
         notes_list_sidebar = QWidget()
-        notes_list_sidebar.setFixedWidth(250)
+        notes_list_sidebar.setMinimumWidth(160)
+        notes_list_sidebar.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
+        self.notes_list_sidebar = notes_list_sidebar
 
         notes_list_sidebar_layout = QVBoxLayout(notes_list_sidebar)
         notes_list_sidebar_layout.setContentsMargins(0, 0, 0, 0)
@@ -540,7 +401,11 @@ Instead, lock all your notes in {APP_NAME}.""")
         sidebar_layout.addWidget(self.settings_button)
 
         main_layout.addWidget(sidebar)
-        main_layout.addWidget(notes_list_sidebar)
+
+        # The splitter lets users resize the notes list without affecting note content.
+        self.notes_splitter = QSplitter(Qt.Horizontal, self)
+        self.notes_splitter.setChildrenCollapsible(False)
+        self.notes_splitter.addWidget(notes_list_sidebar)
 
         # ===========================
         # Workspace
@@ -548,6 +413,8 @@ Instead, lock all your notes in {APP_NAME}.""")
 
         workspace = QWidget()
         self.stack = QVBoxLayout(workspace)
+        self.stack.setContentsMargins(0, 0, 0, 0)
+        self.stack.setSpacing(0)
 
         # Editor
 
@@ -568,12 +435,16 @@ Instead, lock all your notes in {APP_NAME}.""")
         self.editor.setFontPointSize(self.main_text_size)
         self.editor.setFont(self.editor_font)
 
+        self.title_entry.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.editor.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.stack.addWidget(self.title_entry)
-        self.stack.addWidget(self.editor)
+        self.stack.addWidget(self.editor, 1)
 
-        # workspace_layout.addWidget(self.stack)
-
-        main_layout.addWidget(workspace)
+        self.notes_splitter.addWidget(workspace)
+        self.notes_splitter.setStretchFactor(0, 0)
+        self.notes_splitter.setStretchFactor(1, 1)
+        self.notes_splitter.setSizes([250, 900])
+        main_layout.addWidget(self.notes_splitter, 1)
 
         # ===========================
         # Central Widget
@@ -682,6 +553,14 @@ color:#eee;
 
         self.statusArea.addPermanentWidget(self.enablePassword)
         self.statusArea.addPermanentWidget(self.enableAutolock)
+
+    def toggle_notes_sidebar(self):
+        """Hide or restore the notes list while keeping its contents intact."""
+        visible = self.notes_list_sidebar.isVisible()
+        self.notes_list_sidebar.setVisible(not visible)
+        self.notes_toggle_btn.setToolTip(
+            "Show the notes list" if visible else "Hide the notes list"
+        )
 
     def start_autolock_engine(self):
         # Autolock Timer
