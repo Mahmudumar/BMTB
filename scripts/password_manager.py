@@ -233,7 +233,6 @@ class PasswordManager(QDialog):
         self.status.setStyleSheet(f"color:{color};")
         self.status.show()
 
-        print(self.main_layout.children())
 
     def init_ui(self):
         self.setWindowTitle("Enter Password")
@@ -490,9 +489,10 @@ class PasswordManager(QDialog):
         if self.validate_inputs():
             old, new = self.def_password, self.confirm_password_input.text()
             self.save_changed(old, new)
+            self.save_password_hint()
 
-            # everytime, you must modify self.correct accordingly before the password setting window, disappears because it is used by app
-            self.correct=True
+            # The hint is optional; a blank field leaves any saved hint unchanged.
+            self.correct = True
             self.accept()
         else:
             self.correct = False
