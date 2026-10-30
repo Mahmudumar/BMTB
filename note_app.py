@@ -870,7 +870,7 @@ color:#eee;
 
     def auto_save_note(self):
         c_title = self.title_entry.text()
-        c_content = self.markdown_editor.read_source().strip()
+        c_content = self.markdown_editor.read_source()
 
         self.editor.setFontPointSize(self.main_text_size)
 
