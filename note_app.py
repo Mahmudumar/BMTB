@@ -969,7 +969,7 @@ color:#eee;
         elif "out" in type_:
             # print(type_)
             self.main_text_size -= 2
-            tmp = self.editor.toPlainText()
+            tmp = self.markdown_editor.read_source()
             self.editor.blockSignals(True)
             self.editor.selectAll()
             self.editor.setFontPointSize(self.main_text_size)
