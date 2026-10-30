@@ -6,6 +6,7 @@ from PyQt5 import QtCore
 from PyQt5.QtCore import QObject, QEvent, QTimer, pyqtSignal, pyqtSlot
 from scripts.auto_updater import AutoUpdater, ProgressDialog
 from scripts.database_manager import DatabaseManager
+from scripts.markdown_editor import PlainTextMarkdownAdapter
 from scripts.license_manager import LicenseManager
 import sys
 
@@ -427,6 +428,7 @@ QListWidget{
         )
 
         self.editor = QTextEdit()
+        self.markdown_editor = PlainTextMarkdownAdapter(self.editor)
         self.editor.setPlaceholderText("Think...")
         self.editor.textChanged.connect(
             self.trigger_autosave
@@ -868,7 +870,7 @@ color:#eee;
 
     def auto_save_note(self):
         c_title = self.title_entry.text()
-        c_content = self.editor.toPlainText().strip()
+        c_content = self.markdown_editor.read_source().strip()
 
         self.editor.setFontPointSize(self.main_text_size)
 
@@ -958,7 +960,7 @@ color:#eee;
         if "in" in type_:
             # print(type_)
             self.main_text_size += 2
-            tmp = self.editor.toPlainText()
+            tmp = self.markdown_editor.read_source()
             self.editor.blockSignals(True)
             self.editor.selectAll()
             self.editor.setFontPointSize(self.main_text_size)
@@ -1009,7 +1011,7 @@ color:#eee;
         c_content = ""
         if self.current_note_id is None:
             title = self.title_entry.text()
-            c_content = self.editor.toPlainText()
+            c_content = self.markdown_editor.read_source()
 
         self.current_note_id = None
 
@@ -1094,7 +1096,7 @@ color:#eee;
         self.editor.blockSignals(True)
         self.title_entry.blockSignals(True)
         self.title_entry.setText(self.title)
-        self.editor.setPlainText(c_content)
+        self.markdown_editor.load_source(c_content)
         self.title_entry.blockSignals(False)
         self.editor.blockSignals(False)
 
